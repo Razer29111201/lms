@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClassFlow - Hệ thống Quản lý Lớp học</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="./style.css">
+</head>
+
+<body>
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="spinner"></div>
+    </div>
+
+    <!-- LOGIN PAGE -->
+    <div id="loginPage" class="page active">
+        <div class="login-container">
+            <div class="login-box">
+                <div class="login-left">
+                    <h1><i class="fas fa-graduation-cap"></i> ClassFlow</h1>
+                    <p>Hệ thống quản lý lớp học hiện đại với Google Sheets Backend</p>
+                    <div class="login-features">
+                        <div class="feature-item">
+                            <i class="fas fa-check-circle"></i>
+                            <span>Điểm danh nhanh chóng</span>
+                        </div>
+                        <div class="feature-item">
+                            <i class="fas fa-check-circle"></i>
+                            <span>Quản lý học sinh dễ dàng</span>
+                        </div>
+                        <div class="feature-item">
+                            <i class="fas fa-check-circle"></i>
+                            <span>Export Excel tự động</span>
+                        </div>
+                        <div class="feature-item">
+                            <i class="fas fa-check-circle"></i>
+                            <span>Báo cáo chi tiết</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="login-right">
+                    <div class="login-form">
+                        <h2>Đăng nhập</h2>
+                        <div id="loginAlert"></div>
+                        <div class="form-group">
+                            <label>Email</label>
+                            <div class="input-group">
+                                <i class="fas fa-user"></i>
+                                <input type="text" class="form-control" id="loginEmail"
+                                    placeholder="admin@classflow.com">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Mật khẩu</label>
+                            <div class="input-group">
+                                <i class="fas fa-lock"></i>
+                                <input type="password" class="form-control" id="loginPassword" placeholder="••••••••">
+                            </div>
+                        </div>
+                        <button class="btn btn-primary" onclick="login()">
+                            <i class="fas fa-sign-in-alt"></i> Đăng nhập
+                        </button>
+                        <div class="signup-link">
+                            Demo:
+                            <a onclick="quickLogin('admin')">Admin</a> |
+                            <a onclick="quickLogin('teacher')">Teacher</a> |
+                            <a onclick="quickLogin('cm')">CM</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN APP -->
+    <div id="mainApp" class="page">
+        <nav class="navbar">
+            <div class="nav-container">
+                <div class="logo" onclick="showDashboard()">
+                    <i class="fas fa-graduation-cap"></i><span>ClassFlow</span>
+                </div>
+                <div class="nav-right">
+                    <div class="user-info">
+                        <div class="avatar" id="userAvatar">AD</div>
+                        <div>
+                            <div style="font-weight: 600; font-size: 14px;" id="userName">Admin</div>
+                            <span class="badge badge-admin" id="userRole">Admin</span>
+                        </div>
+                    </div>
+                    <button class="btn btn-outline btn-sm" onclick="logout()">
+                        <i class="fas fa-sign-out-alt"></i>
+                    </button>
+                </div>
+            </div>
+        </nav>
+
+        <div class="layout">
+            <aside class="sidebar">
+                <ul class="sidebar-menu">
+                    <li><a class="active" onclick="showDashboard()"><i class="fas fa-th-large"></i> Dashboard</a></li>
+                    <li><a onclick="showClasses()"><i class="fas fa-chalkboard"></i> Lớp học</a></li>
+                    <li><a onclick="showStudents()"><i class="fas fa-user-graduate"></i> Học sinh</a></li>
+                    <li><a onclick="showTeachers()"><i class="fas fa-chalkboard-teacher"></i> Giáo viên</a></li>
+                </ul>
+            </aside>
+
+            <main class="main-content">
+                <!-- DASHBOARD -->
+                <div id="dashboardContent" class="content-section active">
+                    <div class="page-header">
+                        <div class="page-header-left">
+                            <h1>Dashboard</h1>
+                            <p>Tổng quan hệ thống</p>
+                        </div>
+                        <button class="btn btn-success btn-sm" onclick="exportAllData()">
+                            <i class="fas fa-file-excel"></i> Export All
+                        </button>
+                    </div>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon green"><i class="fas fa-chalkboard"></i></div>
+                            <div class="stat-info">
+                                <h3 id="totalClasses">0</h3>
+                                <p>Lớp học</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon blue"><i class="fas fa-user-graduate"></i></div>
+                            <div class="stat-info">
+                                <h3 id="totalStudents">0</h3>
+                                <p>Học sinh</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon orange"><i class="fas fa-chalkboard-teacher"></i></div>
+                            <div class="stat-info">
+                                <h3 id="totalTeachers">0</h3>
+                                <p>Giáo viên</p>
+                            </div>
+                        </div>
+                    </div>
+                    <h2 style="margin-bottom: 24px;">Lớp học gần đây</h2>
+                    <div class="cards-grid" id="dashboardClasses"></div>
+                </div>
+
+                <!-- CLASSES -->
+                <div id="classesContent" class="content-section">
+                    <div class="page-header">
+                        <div class="page-header-left">
+                            <h1>Quản lý lớp học</h1>
+                            <p>Danh sách lớp học</p>
+                        </div>
+                        <div style="display: flex; gap: 12px;">
+                            <button class="btn btn-success btn-sm" onclick="exportClasses()">
+                                <i class="fas fa-file-excel"></i> Export
+                            </button>
+                            <button class="btn btn-primary" onclick="openAddClassModal()">
+                                <i class="fas fa-plus"></i> Thêm lớp
+                            </button>
+                        </div>
+                    </div>
+                    <div class="cards-grid" id="classesGrid"></div>
+                </div>
+
+                <!-- STUDENTS -->
+                <div id="studentsContent" class="content-section">
+                    <div class="page-header">
+                        <div class="page-header-left">
+                            <h1>Quản lý học sinh</h1>
+                            <p>Danh sách học sinh</p>
+                        </div>
+                        <div style="display: flex; gap: 12px;">
+                            <button class="btn btn-success btn-sm" onclick="exportStudents()">
+                                <i class="fas fa-file-excel"></i> Export
+                            </button>
+                            <button class="btn btn-primary" onclick="openAddStudentModal()">
+                                <i class="fas fa-plus"></i> Thêm học sinh
+                            </button>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>MSSV</th>
+                                    <th>Họ tên</th>
+                                    <th>Email</th>
+                                    <th>SĐT</th>
+                                    <th>Lớp</th>
+                                    <th>Thao tác</th>
+                                </tr>
+                            </thead>
+                            <tbody id="studentsTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- TEACHERS -->
+                <div id="teachersContent" class="content-section">
+                    <div class="page-header">
+                        <div class="page-header-left">
+                            <h1>Quản lý giáo viên</h1>
+                            <p>Danh sách giáo viên</p>
+                        </div>
+                        <div style="display: flex; gap: 12px;">
+                            <button class="btn btn-success btn-sm" onclick="exportTeachers()">
+                                <i class="fas fa-file-excel"></i> Export
+                            </button>
+                            <button class="btn btn-primary" onclick="openAddTeacherModal()">
+                                <i class="fas fa-plus"></i> Thêm giáo viên
+                            </button>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Mã GV</th>
+                                    <th>Họ tên</th>
+                                    <th>Email</th>
+                                    <th>SĐT</th>
+                                    <th>Chuyên môn</th>
+                                    <th>Trạng thái</th>
+                                    <th>Thao tác</th>
+                                </tr>
+                            </thead>
+                            <tbody id="teachersTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- CLASS DETAIL MODAL -->
+    <div id="classDetailModal" class="modal">
+        <div class="modal-content large">
+            <div class="modal-header">
+                <h2><i class="fas fa-chalkboard"></i> Chi tiết lớp học</h2>
+                <button class="close-modal" onclick="closeModal('classDetailModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="class-detail-header" id="classDetailHeader"></div>
+                <div class="tabs">
+                    <button class="tab active" onclick="switchTab(event, 'studentsTab')">
+                        <i class="fas fa-users"></i> Học sinh
+                    </button>
+                    <button class="tab" onclick="switchTab(event, 'attendanceTab')">
+                        <i class="fas fa-clipboard-check"></i> Điểm danh
+                    </button>
+                    <button class="tab" onclick="switchTab(event, 'commentsTab')">
+                        <i class="fas fa-comment"></i> Nhận xét
+                    </button>
+                </div>
+                <div id="studentsTab" class="tab-content active">
+                    <div class="student-list" id="classStudentsList"></div>
+                </div>
+                <div id="attendanceTab" class="tab-content">
+                    <h3 style="margin-bottom: 20px;">Chọn buổi học</h3>
+                    <div class="sessions-grid" id="sessionsGrid"></div>
+                    <div class="table-container" style="margin-top: 24px;" id="attendanceTableContainer"></div>
+                </div>
+                <div id="commentsTab" class="tab-content">
+                    <div class="student-list" id="commentsStudentsList"></div>
+                    <div style="margin-top: 24px; text-align: right;">
+                        <button class="btn btn-primary" onclick="saveComments()">
+                            <i class="fas fa-save"></i> Lưu nhận xét
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ADD/EDIT CLASS MODAL -->
+    <div id="classModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="classModalTitle"><i class="fas fa-plus"></i> Thêm lớp học</h2>
+                <button class="close-modal" onclick="closeModal('classModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="classId">
+                <div class="form-group">
+                    <label>Tên lớp <span style="color: red;">*</span></label>
+                    <input type="text" class="form-control" id="className" style="padding-left: 16px;"
+                        placeholder="VD: Lập trình Web">
+                </div>
+                <div class="form-group">
+                    <label>Mã lớp <span style="color: red;">*</span></label>
+                    <input type="text" class="form-control" id="classCode" style="padding-left: 16px;"
+                        placeholder="VD: WEB101">
+                </div>
+                <div class="form-group">
+                    <label>Giáo viên</label>
+                    <select class="form-control" id="classTeacher" style="padding-left: 16px;"></select>
+                </div>
+                <div class="form-group">
+                    <label>Class Manager</label>
+                    <select class="form-control" id="classCM" style="padding-left: 16px;"></select>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div class="form-group">
+                        <label>Ngày bắt đầu</label>
+                        <input type="date" class="form-control" id="classStart" style="padding-left: 16px;">
+                    </div>
+                    <div class="form-group">
+                        <label>Ngày kết thúc</label>
+                        <input type="date" class="form-control" id="classEnd" style="padding-left: 16px;">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Lịch học</label>
+                    <input type="text" class="form-control" id="classSchedule" style="padding-left: 16px;"
+                        placeholder="VD: T2,T4,T6: 18:00-20:00">
+                </div>
+                <div class="form-group">
+                    <label>Số buổi học</label>
+                    <input type="number" class="form-control" id="classSessions" style="padding-left: 16px;" value="15">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeModal('classModal')">Hủy</button>
+                <button class="btn btn-primary" onclick="saveClass()">
+                    <i class="fas fa-save"></i> Lưu
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ADD/EDIT STUDENT MODAL -->
+    <div id="studentModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="studentModalTitle"><i class="fas fa-user-plus"></i> Thêm học sinh</h2>
+                <button class="close-modal" onclick="closeModal('studentModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="studentId">
+                <div class="form-group">
+                    <label>Mã số học sinh <span style="color: red;">*</span></label>
+                    <input type="text" class="form-control" id="studentCode" style="padding-left: 16px;"
+                        placeholder="VD: 2024001">
+                </div>
+                <div class="form-group">
+                    <label>Họ và tên <span style="color: red;">*</span></label>
+                    <input type="text" class="form-control" id="studentName" style="padding-left: 16px;"
+                        placeholder="Nhập họ tên">
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" class="form-control" id="studentEmail" style="padding-left: 16px;"
+                        placeholder="student@email.com">
+                </div>
+                <div class="form-group">
+                    <label>Số điện thoại</label>
+                    <input type="tel" class="form-control" id="studentPhone" style="padding-left: 16px;"
+                        placeholder="0123456789">
+                </div>
+                <div class="form-group">
+                    <label>Lớp học</label>
+                    <select class="form-control" id="studentClass" style="padding-left: 16px;"></select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeModal('studentModal')">Hủy</button>
+                <button class="btn btn-primary" onclick="saveStudent()">
+                    <i class="fas fa-save"></i> Lưu
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ADD/EDIT TEACHER MODAL -->
+    <div id="teacherModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="teacherModalTitle"><i class="fas fa-chalkboard-teacher"></i> Thêm giáo viên</h2>
+                <button class="close-modal" onclick="closeModal('teacherModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="teacherId">
+                <div class="form-group">
+                    <label>Mã giáo viên <span style="color: red;">*</span></label>
+                    <input type="text" class="form-control" id="teacherCode" style="padding-left: 16px;"
+                        placeholder="VD: GV001">
+                </div>
+                <div class="form-group">
+                    <label>Họ và tên <span style="color: red;">*</span></label>
+                    <input type="text" class="form-control" id="teacherName" style="padding-left: 16px;"
+                        placeholder="Nhập họ tên">
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" class="form-control" id="teacherEmail" style="padding-left: 16px;"
+                        placeholder="teacher@email.com">
+                </div>
+                <div class="form-group">
+                    <label>Số điện thoại</label>
+                    <input type="tel" class="form-control" id="teacherPhone" style="padding-left: 16px;"
+                        placeholder="0123456789">
+                </div>
+                <div class="form-group">
+                    <label>Chuyên môn</label>
+                    <input type="text" class="form-control" id="teacherSubject" style="padding-left: 16px;"
+                        placeholder="VD: Lập trình Web">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeModal('teacherModal')">Hủy</button>
+                <button class="btn btn-primary" onclick="saveTeacher()">
+                    <i class="fas fa-save"></i> Lưu
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="config.js"></script>
+    <script src="api.js"></script>
+    <script src="excel.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>
