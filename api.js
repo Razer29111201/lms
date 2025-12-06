@@ -6,11 +6,11 @@ const API = {
         try {
             showLoading();
 
-            // Check if using demo mode (no API URL configured)
-            if (!CONFIG.API_URL || CONFIG.API_URL === 'https://script.google.com/macros/s/AKfycbzFwUtiMQIL4TBLh-8ORkDoL55iAuC2dWDRA_mn_nvTMPIiJsu_CYXYOF628R_DtZ0v/exec') {
-                console.warn('Demo mode: Using local storage');
-                return await this.demoMode(action, data);
-            }
+            // // Check if using demo mode (no API URL configured)
+            // if (!CONFIG.API_URL || CONFIG.API_URL === 'https://script.google.com/macros/s/AKfycbzFwUtiMQIL4TBLh-8ORkDoL55iAuC2dWDRA_mn_nvTMPIiJsu_CYXYOF628R_DtZ0v/exec') {
+            //     console.warn('Demo mode: Using local storage');
+            //     return await this.demoMode(action, data);
+            // }
 
             const response = await fetch(CONFIG.API_URL, {
                 method: 'POST',
@@ -20,6 +20,7 @@ const API = {
                 },
                 body: JSON.stringify({ action, data })
             });
+            console.log(response);
 
             const result = await response.json();
             hideLoading();
