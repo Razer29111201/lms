@@ -14,7 +14,7 @@ const API = {
 
             const response = await fetch(CONFIG.API_URL, {
                 method: 'POST',
-                mode: 'no-cors',
+
                 headers: {
                     'Content-Type': 'application/json',
                 },
