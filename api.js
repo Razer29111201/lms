@@ -544,12 +544,14 @@ const API = {
         return await this.call('deleteTeacher', { id });
     },
 
-    async getAttendance(classId, sessionDate) {
-        return await this.call('getAttendance', { classId, sessionDate });
+    async getAttendance(classId, session) {
+        // session là SỐ BUỔI (1, 2, 3...), không phải date
+        return await this.call('getAttendance', { classId, session });
     },
 
-    async saveAttendance(classId, sessionDate, records) {
-        return await this.call('saveAttendance', { classId, sessionDate, records });
+    async saveAttendance(classId, session, records) {
+        // session là SỐ BUỔI (1, 2, 3...), không phải date
+        return await this.call('saveAttendance', { classId, session, records });
     },
 
     async getComments(classId) {
