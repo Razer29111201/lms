@@ -288,42 +288,91 @@
             </div>
             <div class="modal-body">
                 <input type="hidden" id="classId">
+
                 <div class="form-group">
                     <label>Tên lớp <span style="color: red;">*</span></label>
                     <input type="text" class="form-control" id="className" style="padding-left: 16px;"
-                        placeholder="VD: Lập trình Web">
+                        placeholder="VD: Lập trình Web Frontend">
                 </div>
+
                 <div class="form-group">
                     <label>Mã lớp <span style="color: red;">*</span></label>
                     <input type="text" class="form-control" id="classCode" style="padding-left: 16px;"
                         placeholder="VD: WEB101">
                 </div>
+
                 <div class="form-group">
                     <label>Giáo viên</label>
-                    <select class="form-control" id="classTeacher" style="padding-left: 16px;"></select>
+                    <select class="form-control" id="classTeacher" style="padding-left: 16px;">
+                        <option value="">Chọn giáo viên</option>
+                    </select>
                 </div>
+
                 <div class="form-group">
                     <label>Class Manager</label>
-                    <select class="form-control" id="classCM" style="padding-left: 16px;"></select>
+                    <select class="form-control" id="classCM" style="padding-left: 16px;">
+                        <option value="">Chọn CM</option>
+                    </select>
                 </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-                    <div class="form-group">
-                        <label>Ngày bắt đầu</label>
-                        <input type="date" class="form-control" id="classStart" style="padding-left: 16px;">
-                    </div>
-                    <div class="form-group">
-                        <label>Ngày kết thúc</label>
-                        <input type="date" class="form-control" id="classEnd" style="padding-left: 16px;">
-                    </div>
-                </div>
+
                 <div class="form-group">
-                    <label>Lịch học</label>
-                    <input type="text" class="form-control" id="classSchedule" style="padding-left: 16px;"
-                        placeholder="VD: T2,T4,T6: 18:00-20:00">
+                    <label>Ngày bắt đầu <span style="color: red;">*</span></label>
+                    <input type="date" class="form-control" id="classStartDate" style="padding-left: 16px;"
+                        onchange="previewSessions()">
+                    <small style="color: var(--text-light); margin-top: 4px; display: block;">
+                        Chọn ngày đầu tiên bắt đầu học
+                    </small>
                 </div>
+
                 <div class="form-group">
-                    <label>Số buổi học</label>
-                    <input type="number" class="form-control" id="classSessions" style="padding-left: 16px;" value="15">
+                    <label>Thứ trong tuần <span style="color: red;">*</span></label>
+                    <select class="form-control" id="classWeekDay" style="padding-left: 16px;"
+                        onchange="previewSessions()">
+                        <option value="">Chọn thứ</option>
+                        <option value="0">Chủ nhật</option>
+                        <option value="1">Thứ 2</option>
+                        <option value="2">Thứ 3</option>
+                        <option value="3">Thứ 4</option>
+                        <option value="4">Thứ 5</option>
+                        <option value="5">Thứ 6</option>
+                        <option value="6">Thứ 7</option>
+                    </select>
+                    <small style="color: var(--text-light); margin-top: 4px; display: block;">
+                        Lớp học sẽ diễn ra vào thứ này hàng tuần
+                    </small>
+                </div>
+
+                <div class="form-group">
+                    <label>Khung giờ <span style="color: red;">*</span></label>
+                    <input type="text" class="form-control" id="classTimeSlot" style="padding-left: 16px;"
+                        placeholder="VD: 18:00-20:00">
+                    <small style="color: var(--text-light); margin-top: 4px; display: block;">
+                        Thời gian học trong ngày
+                    </small>
+                </div>
+
+                <!-- Preview Sessions -->
+                <div id="sessionsPreview" style="display: none; margin-top: 20px;">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle"></i>
+                        <div>
+                            <strong>Lịch học dự kiến (15 buổi):</strong>
+                            <div id="sessionsPreviewList" style="margin-top: 8px; font-size: 13px;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="alert"
+                    style="background: #e8f5e9; color: #2d8f47; border: 1px solid #34a853; margin-top: 16px;">
+                    <i class="fas fa-check-circle"></i>
+                    <div>
+                        <strong>Tự động:</strong>
+                        <ul style="margin: 8px 0 0 20px; padding: 0;">
+                            <li>Hệ thống sẽ tự động tạo 15 buổi học</li>
+                            <li>Số học sinh tự động đếm khi thêm học sinh vào lớp</li>
+                            <li>Admin có thể chỉnh sửa lịch sau khi tạo</li>
+                        </ul>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -334,6 +383,7 @@
             </div>
         </div>
     </div>
+
 
     <!-- ADD/EDIT STUDENT MODAL -->
     <div id="studentModal" class="modal">

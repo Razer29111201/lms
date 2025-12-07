@@ -1031,3 +1031,403 @@ function formatDate(dateStr) {
     const date = new Date(dateStr);
     return date.toLocaleDateString('vi-VN');
 }
+
+
+function openAddClassModal() {
+    document.getElementById('classModalTitle').innerHTML = '<i class="fas fa-plus"></i> Thêm lớp học';
+    document.getElementById('classId').value = '';
+    document.getElementById('className').value = '';
+    document.getElementById('classCode').value = '';
+    document.getElementById('classStartDate').value = '';
+    document.getElementById('classWeekDay').value = '';
+    document.getElementById('classTimeSlot').value = '';
+    document.getElementById('sessionsPreview').style.display = 'none';
+
+    populateTeachersSelect();
+    populateCMSelect();
+    openModal('classModal');
+}
+
+async function editClass(classId) {
+    const cls = classes.find(c => c.id === classId);
+    if (!cls) return;
+
+    document.getElementById('classModalTitle').innerHTML = '<i class="fas fa-edit"></i> Chỉnh sửa lớp học';
+    document.getElementById('classId').value = cls.id;
+    document.getElementById('className').value = cls.name;
+    document.getElementById('classCode').value = cls.code;
+    document.getElementById('classStartDate').value = cls.startDate;
+    document.getElementById('classWeekDay').value = cls.weekDay;
+    document.getElementById('classTimeSlot').value = cls.timeSlot;
+
+    await populateTeachersSelect();
+    await populateCMSelect();
+    document.getElementById('classTeacher').value = cls.teacherId;
+    document.getElementById('classCM').value = cls.cmId;
+
+    // Show preview
+    previewSessions();
+
+    openModal('classModal');
+}
+
+async function saveClass() {
+    try {
+        const id = document.getElementById('classId').value;
+        const name = document.getElementById('className').value.trim();
+        const code = document.getElementById('classCode').value.trim();
+        const startDate = document.getElementById('classStartDate').value;
+        const weekDay = document.getElementById('classWeekDay').value;
+        const timeSlot = document.getElementById('classTimeSlot').value.trim();
+
+        // Validation
+        if (!name || !code) {
+            showAlert('error', 'Vui lòng nhập tên lớp và mã lớp');
+            return;
+        }
+
+        if (!startDate) {
+            showAlert('error', 'Vui lòng chọn ngày bắt đầu');
+            return;
+        }
+
+        if (weekDay === '') {
+            showAlert('error', 'Vui lòng chọn thứ trong tuần');
+            return;
+        }
+
+        if (!timeSlot) {
+            showAlert('error', 'Vui lòng nhập khung giờ học');
+            return;
+        }
+
+        const teacherId = parseInt(document.getElementById('classTeacher').value) || 0;
+        const cmId = parseInt(document.getElementById('classCM').value) || 0;
+        const teacher = teachers.find(t => t.id === teacherId);
+        const cm = teachers.find(t => t.id === cmId);
+
+        const classData = {
+            name,
+            code,
+            teacherId,
+            teacher: teacher ? teacher.name : '',
+            cmId,
+            cm: cm ? cm.name : '',
+            startDate,
+            weekDay: parseInt(weekDay),
+            timeSlot,
+            color: CONFIG.CARD_COLORS[Math.floor(Math.random() * CONFIG.CARD_COLORS.length)]
+        };
+
+        console.log('Saving class:', classData);
+
+        if (id) {
+            classData.id = parseInt(id);
+            await API.updateClass(parseInt(id), classData);
+            showAlert('success', 'Đã cập nhật lớp học thành công!');
+        } else {
+            const newClass = await API.createClass(classData);
+            console.log('Class created:', newClass);
+            showAlert('success', 'Đã thêm lớp học mới thành công! Hệ thống đã tự động tạo 15 buổi học.');
+        }
+
+        closeModal('classModal');
+        await loadClasses();
+        await loadDashboard();
+    } catch (error) {
+        console.error('Error saving class:', error);
+        showAlert('error', 'Có lỗi xảy ra khi lưu lớp học: ' + error.message);
+    }
+}
+
+function renderClassCards(classList, containerId) {
+    const container = document.getElementById(containerId);
+
+    console.log('Rendering classes to', containerId, ':', classList);
+
+    if (!container) {
+        console.error('Container not found:', containerId);
+        return;
+    }
+
+    if (!classList || classList.length === 0) {
+        container.innerHTML = `
+            <div style="grid-column: 1/-1; text-align: center; padding: 60px 20px; color: var(--text-light);">
+                <i class="fas fa-inbox" style="font-size: 64px; margin-bottom: 16px; opacity: 0.5;"></i>
+                <h3 style="font-size: 20px; margin-bottom: 8px;">Không có lớp học</h3>
+                <p>Chưa có lớp học nào. ${currentUser.role === 'admin' ? 'Nhấn "Thêm lớp" để tạo mới.' : ''}</p>
+            </div>
+        `;
+        return;
+    }
+
+    const html = classList.map(cls => {
+        // Calculate end date from sessions
+        const endDate = cls.sessions && cls.sessions.length > 0
+            ? cls.sessions[cls.sessions.length - 1].date
+            : '';
+
+        // Get weekday name
+        const weekdayName = getWeekdayName(cls.weekDay);
+
+        return `
+        <div class="class-card" onclick="viewClassDetail(${cls.id})">
+            <div class="card-header ${cls.color || 'green'}">
+                <h3>${cls.name || 'Chưa có tên'}</h3>
+                <div class="class-code">Mã: ${cls.code || 'N/A'}</div>
+            </div>
+            <div class="card-body">
+                <div class="card-info">
+                    <div class="card-info-item">
+                        <i class="fas fa-user-tie"></i>
+                        <span>GV: ${cls.teacher || 'Chưa có'}</span>
+                    </div>
+                    <div class="card-info-item">
+                        <i class="fas fa-user-shield"></i>
+                        <span>CM: ${cls.cm || 'Chưa có'}</span>
+                    </div>
+                    <div class="card-info-item">
+                        <i class="fas fa-users"></i>
+                        <span>${cls.students || 0} học sinh</span>
+                    </div>
+                    <div class="card-info-item">
+                        <i class="fas fa-calendar"></i>
+                        <span>Bắt đầu: ${formatDate(cls.startDate)}</span>
+                    </div>
+                    <div class="card-info-item">
+                        <i class="fas fa-clock"></i>
+                        <span>${weekdayName}: ${cls.timeSlot || 'Chưa có'}</span>
+                    </div>
+                    <div class="card-info-item">
+                        <i class="fas fa-list"></i>
+                        <span>${cls.totalSessions || 15} buổi học</span>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <button class="btn btn-primary" style="flex:1" onclick="event.stopPropagation(); viewClassDetail(${cls.id})">
+                        <i class="fas fa-eye"></i> Chi tiết
+                    </button>
+                    ${currentUser.role === 'admin' ? `
+                        <button class="action-btn edit" onclick="event.stopPropagation(); editClass(${cls.id})">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="action-btn delete" onclick="event.stopPropagation(); deleteClass(${cls.id})">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    ` : ''}
+                </div>
+            </div>
+        </div>
+    `}).join('');
+
+    container.innerHTML = html;
+}
+
+// Helper function (add to app.js if not exists)
+function getWeekdayName(day) {
+    const days = ['Chủ nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
+    return days[day] || '';
+}
+
+// Update renderSessionsGrid to use real session data
+async function renderSessionsGrid(totalSessions) {
+    const container = document.getElementById('sessionsGrid');
+
+    // Load sessions from API
+    let sessions = [];
+    try {
+        sessions = await API.getSessions(currentClassId);
+        console.log('Loaded sessions:', sessions);
+    } catch (error) {
+        console.error('Error loading sessions:', error);
+    }
+
+    if (sessions.length === 0) {
+        // Fallback: generate default sessions
+        const cls = classes.find(c => c.id === currentClassId);
+        if (cls && cls.sessions) {
+            sessions = cls.sessions;
+        }
+    }
+
+    // Load attendance stats for each session
+    const sessionStats = {};
+
+    for (let session of sessions) {
+        try {
+            const records = await API.getAttendance(currentClassId, session.date);
+            sessionStats[session.date] = {
+                onTime: records.filter(r => r.status === 'on-time').length,
+                late: records.filter(r => r.status === 'late').length,
+                excused: records.filter(r => r.status === 'excused').length,
+                absent: records.filter(r => r.status === 'absent').length
+            };
+        } catch (error) {
+            console.error('Error loading stats for session:', session.date, error);
+        }
+    }
+
+    let html = '';
+    sessions.forEach((session, index) => {
+        const stats = sessionStats[session.date] || { onTime: 0, late: 0, excused: 0, absent: 0 };
+        const hasData = stats.onTime + stats.late + stats.excused + stats.absent > 0;
+        const isPast = new Date(session.date) < new Date();
+
+        html += `
+            <div class="session-card ${index === 0 ? 'active' : ''}" onclick="selectSession('${session.date}')">
+                <h4>Buổi ${session.number}</h4>
+                <p style="font-size: 12px;">${formatDate(session.date)}</p>
+                <p style="font-size: 11px; opacity: 0.8;">${hasData ? 'Đã điểm danh' : isPast ? 'Chưa điểm danh' : 'Sắp tới'}</p>
+                ${hasData ? `
+                    <div class="session-stats">
+                        <div class="session-stat">
+                            <span>${stats.onTime}</span>
+                            <span>✓</span>
+                        </div>
+                        <div class="session-stat">
+                            <span>${stats.late}</span>
+                            <span>⏰</span>
+                        </div>
+                        <div class="session-stat">
+                            <span>${stats.absent}</span>
+                            <span>✗</span>
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+
+    // Render first session
+    if (sessions.length > 0) {
+        await renderAttendanceTable(sessions[0].date);
+    }
+}
+
+// Update selectSession to use date instead of number
+let currentSessionDate = null;
+
+function selectSession(sessionDate) {
+    currentSessionDate = sessionDate;
+    document.querySelectorAll('.session-card').forEach(card => card.classList.remove('active'));
+    event.currentTarget.classList.add('active');
+    renderAttendanceTable(sessionDate);
+}
+
+// Update renderAttendanceTable to use sessionDate
+async function renderAttendanceTable(sessionDate) {
+    const classStudents = students.filter(s => s.classId === currentClassId);
+    const container = document.getElementById('attendanceTableContainer');
+
+    currentSessionDate = sessionDate;
+
+    // Load existing attendance
+    let attendanceRecords = [];
+    try {
+        attendanceRecords = await API.getAttendance(currentClassId, sessionDate);
+        console.log('Loaded attendance for', sessionDate, ':', attendanceRecords);
+    } catch (error) {
+        console.error('Error loading attendance:', error);
+    }
+
+    const attendanceMap = {};
+    attendanceRecords.forEach(record => {
+        attendanceMap[record.studentid || record.studentId] = {
+            status: record.status,
+            note: record.note
+        };
+    });
+
+    container.innerHTML = `
+        <div style="padding: 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+            <h3>Điểm danh ngày ${formatDate(sessionDate)}</h3>
+            <button class="btn btn-primary" onclick="saveAttendance()">
+                <i class="fas fa-save"></i> Lưu điểm danh
+            </button>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>STT</th>
+                    <th>Họ tên</th>
+                    <th>MSSV</th>
+                    <th>Trạng thái</th>
+                    <th>Ghi chú</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${classStudents.map((s, i) => {
+        const attendance = attendanceMap[s.id] || { status: 'on-time', note: '' };
+        return `
+                    <tr>
+                        <td>${i + 1}</td>
+                        <td>${s.name}</td>
+                        <td>${s.code}</td>
+                        <td>
+                            <div class="attendance-status">
+                                <button class="status-btn on-time ${attendance.status === 'on-time' ? 'active' : ''}" onclick="setAttendance(this)">
+                                    <i class="fas fa-check"></i> Đúng giờ
+                                </button>
+                                <button class="status-btn late ${attendance.status === 'late' ? 'active' : ''}" onclick="setAttendance(this)">
+                                    <i class="fas fa-clock"></i> Muộn
+                                </button>
+                                <button class="status-btn excused ${attendance.status === 'excused' ? 'active' : ''}" onclick="setAttendance(this)">
+                                    <i class="fas fa-file-alt"></i> Có phép
+                                </button>
+                                <button class="status-btn absent ${attendance.status === 'absent' ? 'active' : ''}" onclick="setAttendance(this)">
+                                    <i class="fas fa-times"></i> Vắng
+                                </button>
+                            </div>
+                        </td>
+                        <td><input type="text" class="note-input" placeholder="Ghi chú..." value="${attendance.note || ''}" data-student-id="${s.id}"></td>
+                    </tr>
+                `}).join('')}
+            </tbody>
+        </table>
+    `;
+}
+
+// Update saveAttendance to use sessionDate
+async function saveAttendance() {
+    try {
+        if (!currentSessionDate) {
+            showAlert('error', 'Chưa chọn buổi học');
+            return;
+        }
+
+        const records = [];
+        const rows = document.querySelectorAll('#attendanceTableContainer tbody tr');
+
+        rows.forEach(row => {
+            const activeBtn = row.querySelector('.status-btn.active');
+            const noteInput = row.querySelector('.note-input');
+            const studentId = noteInput.dataset.studentId;
+
+            if (activeBtn) {
+                const status = activeBtn.classList.contains('on-time') ? 'on-time' :
+                    activeBtn.classList.contains('late') ? 'late' :
+                        activeBtn.classList.contains('excused') ? 'excused' : 'absent';
+
+                records.push({
+                    studentId: parseInt(studentId),
+                    status,
+                    note: noteInput.value
+                });
+            }
+        });
+
+        await API.saveAttendance(currentClassId, currentSessionDate, records);
+        showAlert('success', 'Đã lưu điểm danh thành công!');
+
+        // Reload sessions grid to update stats
+        const cls = classes.find(c => c.id === currentClassId);
+        if (cls) {
+            await renderSessionsGrid(cls.totalSessions);
+        }
+    } catch (error) {
+        console.error('Error saving attendance:', error);
+        showAlert('error', 'Không thể lưu điểm danh');
+    }
+}

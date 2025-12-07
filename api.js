@@ -1,4 +1,4 @@
-// ===== API SERVICE (FIXED CORS) =====
+// ===== API SERVICE (WITH AUTO SESSIONS) =====
 
 const API = {
     // Base API call function
@@ -6,13 +6,12 @@ const API = {
         try {
             showLoading();
 
-            // Check if using demo mode (no API URL configured)
+            // Check if using demo mode
             if (!CONFIG.API_URL || CONFIG.API_URL === 'YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE') {
                 console.warn('Demo mode: Using local storage');
                 return await this.demoMode(action, data);
             }
 
-            // Google Apps Script requires specific format
             const url = `${CONFIG.API_URL}?action=${action}`;
 
             const response = await fetch(url, {
@@ -35,8 +34,6 @@ const API = {
         } catch (error) {
             hideLoading();
             console.error('API Error:', error);
-
-            // Fallback to demo mode if API fails
             console.warn('API failed, switching to demo mode');
             return await this.demoMode(action, data);
         }
@@ -44,12 +41,13 @@ const API = {
 
     // Demo mode using localStorage
     async demoMode(action, data) {
-        await new Promise(resolve => setTimeout(resolve, 300)); // Simulate network delay
+        await new Promise(resolve => setTimeout(resolve, 300));
 
         const storage = {
             classes: JSON.parse(localStorage.getItem('classflow_classes') || '[]'),
             students: JSON.parse(localStorage.getItem('classflow_students') || '[]'),
             teachers: JSON.parse(localStorage.getItem('classflow_teachers') || '[]'),
+            sessions: JSON.parse(localStorage.getItem('classflow_sessions') || '{}'),
             attendance: JSON.parse(localStorage.getItem('classflow_attendance') || '{}'),
             comments: JSON.parse(localStorage.getItem('classflow_comments') || '{}')
         };
@@ -59,9 +57,16 @@ const API = {
             storage.classes = this.getDemoClasses();
             storage.students = this.getDemoStudents();
             storage.teachers = this.getDemoTeachers();
+
+            // Generate sessions for demo classes
+            storage.classes.forEach(cls => {
+                storage.sessions[cls.id] = this.generateSessions(cls.startDate, cls.weekDay);
+            });
+
             localStorage.setItem('classflow_classes', JSON.stringify(storage.classes));
             localStorage.setItem('classflow_students', JSON.stringify(storage.students));
             localStorage.setItem('classflow_teachers', JSON.stringify(storage.teachers));
+            localStorage.setItem('classflow_sessions', JSON.stringify(storage.sessions));
         }
 
         hideLoading();
@@ -69,29 +74,81 @@ const API = {
         switch (action) {
             // CLASSES
             case 'getClasses':
-                return storage.classes;
+                // Auto-count students for each class
+                return storage.classes.map(cls => {
+                    const studentCount = storage.students.filter(s => s.classId === cls.id).length;
+                    const sessions = storage.sessions[cls.id] || [];
+                    return {
+                        ...cls,
+                        students: studentCount,
+                        sessions: sessions,
+                        totalSessions: sessions.length
+                    };
+                });
 
             case 'getClass':
-                return storage.classes.find(c => c.id === data.id);
+                const cls = storage.classes.find(c => c.id === data.id);
+                if (cls) {
+                    const studentCount = storage.students.filter(s => s.classId === cls.id).length;
+                    const sessions = storage.sessions[cls.id] || [];
+                    return {
+                        ...cls,
+                        students: studentCount,
+                        sessions: sessions,
+                        totalSessions: sessions.length
+                    };
+                }
+                return null;
 
             case 'createClass':
-                const newClass = { ...data, id: Date.now() };
+                const newClass = {
+                    ...data,
+                    id: Date.now(),
+                    students: 0
+                };
+
+                // Generate sessions
+                const newSessions = this.generateSessions(data.startDate, data.weekDay);
+                storage.sessions[newClass.id] = newSessions;
+                newClass.sessions = newSessions;
+                newClass.totalSessions = newSessions.length;
+
                 storage.classes.push(newClass);
                 localStorage.setItem('classflow_classes', JSON.stringify(storage.classes));
+                localStorage.setItem('classflow_sessions', JSON.stringify(storage.sessions));
                 return newClass;
 
             case 'updateClass':
                 const classIndex = storage.classes.findIndex(c => c.id === data.id);
                 if (classIndex !== -1) {
                     storage.classes[classIndex] = { ...storage.classes[classIndex], ...data };
+
+                    // Regenerate sessions if startDate or weekDay changed
+                    const updatedSessions = this.generateSessions(data.startDate, data.weekDay);
+                    storage.sessions[data.id] = updatedSessions;
+                    storage.classes[classIndex].sessions = updatedSessions;
+                    storage.classes[classIndex].totalSessions = updatedSessions.length;
+
                     localStorage.setItem('classflow_classes', JSON.stringify(storage.classes));
+                    localStorage.setItem('classflow_sessions', JSON.stringify(storage.sessions));
                     return storage.classes[classIndex];
                 }
                 throw new Error('Class not found');
 
             case 'deleteClass':
                 storage.classes = storage.classes.filter(c => c.id !== data.id);
+                delete storage.sessions[data.id];
                 localStorage.setItem('classflow_classes', JSON.stringify(storage.classes));
+                localStorage.setItem('classflow_sessions', JSON.stringify(storage.sessions));
+                return { success: true };
+
+            // SESSIONS
+            case 'getSessions':
+                return storage.sessions[data.classId] || [];
+
+            case 'updateSessions':
+                storage.sessions[data.classId] = data.sessions;
+                localStorage.setItem('classflow_sessions', JSON.stringify(storage.sessions));
                 return { success: true };
 
             // STUDENTS
@@ -148,13 +205,14 @@ const API = {
                 localStorage.setItem('classflow_teachers', JSON.stringify(storage.teachers));
                 return { success: true };
 
-            // ATTENDANCE
+            // ATTENDANCE (by session date)
             case 'getAttendance':
-                return storage.attendance[`${data.classId}_${data.session}`] || [];
+                const key = `${data.classId}_${data.sessionDate}`;
+                return storage.attendance[key] || [];
 
             case 'saveAttendance':
-                const key = `${data.classId}_${data.session}`;
-                storage.attendance[key] = data.records;
+                const attendanceKey = `${data.classId}_${data.sessionDate}`;
+                storage.attendance[attendanceKey] = data.records;
                 localStorage.setItem('classflow_attendance', JSON.stringify(storage.attendance));
                 return { success: true };
 
@@ -172,6 +230,31 @@ const API = {
         }
     },
 
+    // Generate session dates
+    generateSessions(startDate, weekDay, total = 15) {
+        const sessions = [];
+        const start = new Date(startDate);
+
+        // Find first occurrence of target weekday
+        let current = new Date(start);
+        while (current.getDay() !== weekDay) {
+            current.setDate(current.getDate() + 1);
+        }
+
+        // Generate sessions
+        for (let i = 0; i < total; i++) {
+            sessions.push({
+                number: i + 1,
+                date: current.toISOString().split('T')[0],
+                status: 'scheduled',
+                note: ''
+            });
+            current.setDate(current.getDate() + 7); // Next week
+        }
+
+        return sessions;
+    },
+
     // Get demo data
     getDemoClasses() {
         return [
@@ -183,11 +266,9 @@ const API = {
                 teacherId: 1,
                 cm: 'Hoàng Văn E',
                 cmId: 1,
-                students: 28,
-                start: '2024-09-01',
-                end: '2024-11-30',
-                schedule: 'T2,T4,T6: 18:00-20:00',
-                sessions: 15,
+                startDate: '2024-09-02',
+                weekDay: 1, // Monday
+                timeSlot: '18:00-20:00',
                 color: 'green'
             },
             {
@@ -198,11 +279,9 @@ const API = {
                 teacherId: 2,
                 cm: 'Phạm Thị F',
                 cmId: 2,
-                students: 22,
-                start: '2024-09-15',
-                end: '2024-12-15',
-                schedule: 'T3,T5,T7: 19:00-21:00',
-                sessions: 15,
+                startDate: '2024-09-03',
+                weekDay: 2, // Tuesday
+                timeSlot: '19:00-21:00',
                 color: 'blue'
             },
             {
@@ -213,27 +292,10 @@ const API = {
                 teacherId: 3,
                 cm: 'Hoàng Văn E',
                 cmId: 1,
-                students: 18,
-                start: '2024-10-10',
-                end: '2025-01-10',
-                schedule: 'T2,T4: 18:30-21:00',
-                sessions: 15,
+                startDate: '2024-10-10',
+                weekDay: 4, // Thursday
+                timeSlot: '18:30-21:00',
                 color: 'orange'
-            },
-            {
-                id: 4,
-                name: 'Marketing Digital',
-                code: 'MKT101',
-                teacher: 'Nguyễn Văn C',
-                teacherId: 2,
-                cm: 'Hoàng Văn E',
-                cmId: 1,
-                students: 25,
-                start: '2024-09-20',
-                end: '2024-12-20',
-                schedule: 'T3,T5: 19:00-21:30',
-                sessions: 15,
-                color: 'red'
             }
         ];
     },
@@ -302,15 +364,6 @@ const API = {
                 phone: '0901234573',
                 classId: 3,
                 className: 'PY301'
-            },
-            {
-                id: 8,
-                code: '2024008',
-                name: 'Bùi Văn Hùng',
-                email: 'buivanhung@email.com',
-                phone: '0901234574',
-                classId: 4,
-                className: 'MKT101'
             }
         ];
     },
@@ -368,6 +421,14 @@ const API = {
         return await this.call('deleteClass', { id });
     },
 
+    async getSessions(classId) {
+        return await this.call('getSessions', { classId });
+    },
+
+    async updateSessions(classId, sessions) {
+        return await this.call('updateSessions', { classId, sessions });
+    },
+
     async getStudents() {
         return await this.call('getStudents');
     },
@@ -408,12 +469,12 @@ const API = {
         return await this.call('deleteTeacher', { id });
     },
 
-    async getAttendance(classId, session) {
-        return await this.call('getAttendance', { classId, session });
+    async getAttendance(classId, sessionDate) {
+        return await this.call('getAttendance', { classId, sessionDate });
     },
 
-    async saveAttendance(classId, session, records) {
-        return await this.call('saveAttendance', { classId, session, records });
+    async saveAttendance(classId, sessionDate, records) {
+        return await this.call('saveAttendance', { classId, sessionDate, records });
     },
 
     async getComments(classId) {
@@ -450,4 +511,67 @@ function showAlert(type, message) {
     setTimeout(() => {
         alertDiv.remove();
     }, 5000);
+}
+
+// Helper: Get weekday name in Vietnamese
+function getWeekdayName(day) {
+    const days = ['Chủ nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
+    return days[day] || '';
+}
+function previewSessions() {
+    const startDate = document.getElementById('classStartDate').value;
+    const weekDay = document.getElementById('classWeekDay').value;
+
+    if (!startDate || weekDay === '') {
+        document.getElementById('sessionsPreview').style.display = 'none';
+        return;
+    }
+
+    // Generate preview
+    const sessions = generateSessionsPreview(startDate, parseInt(weekDay));
+
+    // Display preview
+    const previewList = document.getElementById('sessionsPreviewList');
+    const firstFive = sessions.slice(0, 5);
+    const last = sessions[sessions.length - 1];
+
+    previewList.innerHTML = `
+        <div>• Buổi 1: ${formatDateVN(firstFive[0].date)}</div>
+        <div>• Buổi 2: ${formatDateVN(firstFive[1].date)}</div>
+        <div>• Buổi 3: ${formatDateVN(firstFive[2].date)}</div>
+        <div>• Buổi 4: ${formatDateVN(firstFive[3].date)}</div>
+        <div>• Buổi 5: ${formatDateVN(firstFive[4].date)}</div>
+        <div style="margin: 4px 0;">...</div>
+        <div>• Buổi 15: ${formatDateVN(last.date)}</div>
+    `;
+
+    document.getElementById('sessionsPreview').style.display = 'block';
+}
+
+function generateSessionsPreview(startDate, weekDay, total = 15) {
+    const sessions = [];
+    const start = new Date(startDate);
+
+    // Find first occurrence of weekday
+    let current = new Date(start);
+    while (current.getDay() !== weekDay) {
+        current.setDate(current.getDate() + 1);
+    }
+
+    // Generate sessions
+    for (let i = 0; i < total; i++) {
+        sessions.push({
+            number: i + 1,
+            date: current.toISOString().split('T')[0]
+        });
+        current.setDate(current.getDate() + 7);
+    }
+
+    return sessions;
+}
+
+function formatDateVN(dateStr) {
+    const date = new Date(dateStr);
+    const days = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+    return `${days[date.getDay()]}, ${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()}`;
 }
