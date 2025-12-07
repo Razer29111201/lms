@@ -244,8 +244,122 @@ const API = {
                 storage.comments[data.classId] = data.comments;
                 localStorage.setItem('classflow_comments', JSON.stringify(storage.comments));
                 return { success: true };
+            case 'login':
+                const user = storage.users.find(u =>
+                    u.email.toLowerCase() === data.email.toLowerCase() &&
+                    u.password === data.password
+                );
+
+                if (user) {
+                    return {
+                        success: true,
+                        user: {
+                            id: user.id,
+                            email: user.email,
+                            name: user.name,
+                            role: user.role,
+                            teacherId: user.teacherId,
+                            cmId: user.cmId
+                        }
+                    };
+                }
+
+                return {
+                    success: false,
+                    message: 'Email hoặc mật khẩu không đúng'
+                };
+
+            case 'register':
+                // Check if email exists
+                const emailExists = storage.users.some(u =>
+                    u.email.toLowerCase() === data.email.toLowerCase()
+                );
+
+                if (emailExists) {
+                    return {
+                        success: false,
+                        message: 'Email đã được sử dụng'
+                    };
+                }
+
+                const newUser = {
+                    id: Date.now(),
+                    email: data.email,
+                    password: data.password,
+                    name: data.name,
+                    role: data.role,
+                    teacherId: data.linkId && data.role === 'teacher' ? parseInt(data.linkId) : null,
+                    cmId: data.linkId && data.role === 'cm' ? parseInt(data.linkId) : null,
+                    createdAt: new Date().toISOString()
+                };
+
+                storage.users.push(newUser);
+                localStorage.setItem('classflow_users', JSON.stringify(storage.users));
+
+                return {
+                    success: true,
+                    user: {
+                        id: newUser.id,
+                        email: newUser.email,
+                        name: newUser.name,
+                        role: newUser.role,
+                        teacherId: newUser.teacherId,
+                        cmId: newUser.cmId
+                    }
+                };
+
+            case 'getUsers':
+                return storage.users.map(u => ({
+                    id: u.id,
+                    email: u.email,
+                    name: u.name,
+                    role: u.role,
+                    teacherId: u.teacherId,
+                    cmId: u.cmId,
+                    createdAt: u.createdAt
+                }));
+
+            case 'getUser':
+                return storage.users.find(u => u.id === data.id);
+
+            case 'updateUser':
+                const userIndex = storage.users.findIndex(u => u.id === data.id);
+                if (userIndex !== -1) {
+                    storage.users[userIndex] = {
+                        ...storage.users[userIndex],
+                        ...data,
+                        password: storage.users[userIndex].password // Keep password
+                    };
+                    localStorage.setItem('classflow_users', JSON.stringify(storage.users));
+                    return { success: true };
+                }
+                throw new Error('User not found');
+
+            case 'changePassword':
+                const userToUpdate = storage.users.find(u => u.id === data.userId);
+                if (userToUpdate) {
+                    if (userToUpdate.password !== data.oldPassword) {
+                        return {
+                            success: false,
+                            message: 'Mật khẩu cũ không đúng'
+                        };
+                    }
+                    userToUpdate.password = data.newPassword;
+                    localStorage.setItem('classflow_users', JSON.stringify(storage.users));
+                    return {
+                        success: true,
+                        message: 'Đổi mật khẩu thành công'
+                    };
+                }
+                return {
+                    success: false,
+                    message: 'Người dùng không tồn tại'
+                };
 
             default:
+                throw new Error('Unknown action: ' + action);
+
+
                 throw new Error('Unknown action: ' + action);
         }
     },
@@ -421,7 +535,29 @@ const API = {
     },
 
     // Specific API methods
+    async login(email, password) {
+        return await this.call('login', { email, password });
+    }
+    ,
+    async register(userData) {
+        return await this.call('register', userData);
+    },
 
+    async getUsers() {
+        return await this.call('getUsers');
+    }
+    ,
+    async getUser(id) {
+        return await this.call('getUser', { id });
+    }
+    ,
+    async updateUser(id, userData) {
+        return await this.call('updateUser', { id, ...userData });
+    },
+
+    async changePassword(userId, oldPassword, newPassword) {
+        return await this.call('changePassword', { userId, oldPassword, newPassword });
+    },
     // Get all CMs
     async getCMs() {
         return await this.request('getCMs');
@@ -879,3 +1015,4 @@ function isValidPhone(phone) {
     const phoneRegex = /^(0|\+84)[0-9]{9,10}$/;
     return phoneRegex.test(phone.replace(/\s/g, ''));
 }
+

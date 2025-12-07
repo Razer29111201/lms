@@ -37,22 +37,25 @@
                         </div>
                         <div class="feature-item">
                             <i class="fas fa-check-circle"></i>
-                            <span>Báo cáo chi tiết</span>
+                            <span>Phân quyền rõ ràng</span>
                         </div>
                     </div>
                 </div>
                 <div class="login-right">
-                    <div class="login-form">
-                        <h2>Đăng nhập</h2>
+                    <!-- LOGIN FORM -->
+                    <div class="login-form" id="loginForm">
+                        <h2 id="loginTitle">Đăng nhập</h2>
                         <div id="loginAlert"></div>
+
                         <div class="form-group">
                             <label>Email</label>
                             <div class="input-group">
                                 <i class="fas fa-user"></i>
-                                <input type="text" class="form-control" id="loginEmail"
-                                    placeholder="admin@classflow.com">
+                                <input type="email" class="form-control" id="loginEmail"
+                                    placeholder="email@example.com">
                             </div>
                         </div>
+
                         <div class="form-group">
                             <label>Mật khẩu</label>
                             <div class="input-group">
@@ -60,20 +63,127 @@
                                 <input type="password" class="form-control" id="loginPassword" placeholder="••••••••">
                             </div>
                         </div>
+
                         <button class="btn btn-primary" onclick="login()">
                             <i class="fas fa-sign-in-alt"></i> Đăng nhập
                         </button>
+
                         <div class="signup-link">
-                            Demo:
-                            <a onclick="quickLogin('admin')">Admin</a> |
-                            <a onclick="quickLogin('teacher')">Teacher</a> |
-                            <a onclick="quickLogin('cm')">CM</a>
+                            Chưa có tài khoản?
+                            <a onclick="showRegisterForm()">Đăng ký ngay</a>
+                        </div>
+
+                        <div class="divider">
+                            <span>HOẶC</span>
+                        </div>
+
+                        <div class="demo-accounts">
+                            <p style="font-size: 13px; color: var(--text-light); margin-bottom: 12px;">
+                                Tài khoản demo:
+                            </p>
+                            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                <button class="btn btn-outline btn-sm" onclick="quickLogin('admin')" style="flex: 1;">
+                                    <i class="fas fa-user-shield"></i> Admin
+                                </button>
+                                <button class="btn btn-outline btn-sm" onclick="quickLogin('teacher')" style="flex: 1;">
+                                    <i class="fas fa-chalkboard-teacher"></i> Teacher
+                                </button>
+                                <button class="btn btn-outline btn-sm" onclick="quickLogin('cm')" style="flex: 1;">
+                                    <i class="fas fa-user-tie"></i> CM
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- REGISTER FORM -->
+                    <div class="login-form" id="registerForm" style="display: none;">
+                        <h2>Đăng ký tài khoản</h2>
+                        <div id="loginAlert"></div>
+
+                        <div class="form-group">
+                            <label>Họ và tên <span style="color: red;">*</span></label>
+                            <div class="input-group">
+                                <i class="fas fa-user"></i>
+                                <input type="text" class="form-control" id="registerName" placeholder="Nguyễn Văn A">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Email <span style="color: red;">*</span></label>
+                            <div class="input-group">
+                                <i class="fas fa-envelope"></i>
+                                <input type="email" class="form-control" id="registerEmail"
+                                    placeholder="email@example.com">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Mật khẩu <span style="color: red;">*</span></label>
+                            <div class="input-group">
+                                <i class="fas fa-lock"></i>
+                                <input type="password" class="form-control" id="registerPassword"
+                                    placeholder="Tối thiểu 6 ký tự">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Xác nhận mật khẩu <span style="color: red;">*</span></label>
+                            <div class="input-group">
+                                <i class="fas fa-lock"></i>
+                                <input type="password" class="form-control" id="registerConfirmPassword"
+                                    placeholder="Nhập lại mật khẩu">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Vai trò <span style="color: red;">*</span></label>
+                            <select class="form-control" id="registerRole" onchange="loadTeacherCMOptions()"
+                                style="padding-left: 16px;">
+                                <option value="">Chọn vai trò</option>
+                                <option value="teacher">Giáo viên</option>
+                                <option value="cm">Class Manager</option>
+                            </select>
+                            <small style="color: var(--text-light); margin-top: 4px; display: block;">
+                                Admin chỉ được tạo bởi hệ thống
+                            </small>
+                        </div>
+
+                        <!-- Link Account Section -->
+                        <div class="form-group" id="linkAccountSection" style="display: none;">
+                            <label id="linkAccountLabel">Liên kết với hồ sơ:</label>
+                            <select class="form-control" id="linkAccountSelect" style="padding-left: 16px;">
+                                <option value="">Chọn...</option>
+                            </select>
+                            <small style="color: var(--text-light); margin-top: 4px; display: block;">
+                                Nếu bạn đã có hồ sơ trong hệ thống, hãy liên kết để đồng bộ dữ liệu
+                            </small>
+                        </div>
+
+                        <div class="alert alert-info" style="margin-top: 16px;">
+                            <i class="fas fa-info-circle"></i>
+                            <div>
+                                <strong>Quyền hạn:</strong>
+                                <ul style="margin: 8px 0 0 20px; padding: 0; font-size: 13px;">
+                                    <li><strong>Giáo viên:</strong> Xem lớp, điểm danh, nhận xét học sinh</li>
+                                    <li><strong>CM:</strong> Quản lý lớp, quản lý học sinh, xem báo cáo</li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <button class="btn btn-primary" onclick="register()">
+                            <i class="fas fa-user-plus"></i> Đăng ký
+                        </button>
+
+                        <div class="signup-link">
+                            Đã có tài khoản?
+                            <a onclick="showLoginForm()">Đăng nhập</a>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
+
 
     <!-- MAIN APP -->
     <div id="mainApp" class="page">
@@ -100,11 +210,31 @@
         <div class="layout">
             <aside class="sidebar">
                 <ul class="sidebar-menu">
-                    <li><a class="active" onclick="showDashboard()"><i class="fas fa-th-large"></i> Dashboard</a></li>
-                    <li><a onclick="showClasses()"><i class="fas fa-chalkboard"></i> Lớp học</a></li>
-                    <li><a onclick="showStudents()"><i class="fas fa-user-graduate"></i> Học sinh</a></li>
-                    <li><a onclick="showTeachers()"><i class="fas fa-chalkboard-teacher"></i> Giáo viên</a></li>
-                    <li><a onclick="showCMs()"><i class="fas fa-user-shield"></i> Class Manager</a></li>
+                    <li>
+                        <a class="active" onclick="showDashboard()">
+                            <i class="fas fa-th-large"></i> Dashboard
+                        </a>
+                    </li>
+                    <li>
+                        <a onclick="showClasses()">
+                            <i class="fas fa-chalkboard"></i> Lớp học
+                        </a>
+                    </li>
+                    <li>
+                        <a onclick="showStudents()">
+                            <i class="fas fa-user-graduate"></i> Học sinh
+                        </a>
+                    </li>
+                    <li>
+                        <a onclick="showTeachers()">
+                            <i class="fas fa-chalkboard-teacher"></i> Giáo viên
+                        </a>
+                    </li>
+                    <li>
+                        <a onclick="showCMs()">
+                            <i class="fas fa-user-shield"></i> Class Manager
+                        </a>
+                    </li>
                 </ul>
             </aside>
 
