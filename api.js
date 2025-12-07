@@ -38,7 +38,27 @@ const API = {
             return await this.demoMode(action, data);
         }
     },
+    async request(action, data = {}) {
+        const url = `${CONFIG.API_URL}?action=${action}`;
 
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                body: JSON.stringify(data)
+            });
+
+            const result = await response.json();
+
+            if (!result.success) {
+                throw new Error(result.error || 'Unknown error');
+            }
+
+            return result.data;
+        } catch (error) {
+            console.error('API Error:', error);
+            throw error;
+        }
+    },
     // Demo mode using localStorage
     async demoMode(action, data) {
         await new Promise(resolve => setTimeout(resolve, 300));
@@ -401,6 +421,61 @@ const API = {
     },
 
     // Specific API methods
+
+    // Get all CMs
+    async getCMs() {
+        return await this.request('getCMs');
+    },
+
+    // Get single CM by ID
+    async getCM(id) {
+        return await this.request('getCM', { id });
+    },
+
+    // Create new CM
+    async createCM(cmData) {
+        return await this.request('createCM', cmData);
+    },
+
+    // Update existing CM
+    async updateCM(id, cmData) {
+        return await this.request('updateCM', { ...cmData, id });
+    },
+
+    // Delete CM
+    async deleteCM(id) {
+        return await this.request('deleteCM', { id });
+    },
+
+    // Get CM with full details (classes, students, etc.)
+    async getCMDetails(id) {
+        return await this.request('getCMWithDetails', { id });
+    },
+
+    // Get CM statistics
+    async getCMStatistics(id) {
+        return await this.request('getCMStatistics', { id });
+    },
+
+    // Search CMs
+    async searchCMs(keyword) {
+        return await this.request('searchCMs', { keyword });
+    },
+
+    // Get active CMs only
+    async getActiveCMs() {
+        return await this.request('getActiveCMs');
+    },
+
+    // Bulk update CM status
+    async bulkUpdateCMStatus(cmIds, active) {
+        return await this.request('bulkUpdateCMStatus', { cmIds, active });
+    },
+
+    // Get CM report (for export)
+    async getCMReport(id) {
+        return await this.request('getCMReport', { id });
+    },
     async getClasses() {
         return await this.call('getClasses');
     },
@@ -574,4 +649,231 @@ function formatDateVN(dateStr) {
     const date = new Date(dateStr);
     const days = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
     return `${days[date.getDay()]}, ${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()}`;
+}
+
+// Cache for CM data to reduce API calls
+const CMCache = {
+    data: null,
+    timestamp: null,
+    ttl: 5 * 60 * 1000, // 5 minutes
+
+    async get() {
+        const now = Date.now();
+
+        if (this.data && this.timestamp && (now - this.timestamp < this.ttl)) {
+            return this.data;
+        }
+
+        this.data = await API.getCMs();
+        this.timestamp = now;
+        return this.data;
+    },
+
+    invalidate() {
+        this.data = null;
+        this.timestamp = null;
+    },
+
+    update(cmId, updatedCM) {
+        if (this.data) {
+            const index = this.data.findIndex(cm => cm.id === cmId);
+            if (index !== -1) {
+                this.data[index] = updatedCM;
+            }
+        }
+    },
+
+    remove(cmId) {
+        if (this.data) {
+            this.data = this.data.filter(cm => cm.id !== cmId);
+        }
+    },
+
+    add(newCM) {
+        if (this.data) {
+            this.data.push(newCM);
+        }
+    }
+};
+
+// Enhanced API wrapper with caching
+const CMAPI = {
+    async getAll(useCache = true) {
+        if (useCache) {
+            return await CMCache.get();
+        }
+        return await API.getCMs();
+    },
+
+    async getById(id) {
+        const cached = await CMCache.get();
+        const cm = cached.find(c => c.id === parseInt(id));
+
+        if (cm) {
+            return cm;
+        }
+
+        return await API.getCM(id);
+    },
+
+    async create(cmData) {
+        const result = await API.createCM(cmData);
+        CMCache.add(result);
+        return result;
+    },
+
+    async update(id, cmData) {
+        const result = await API.updateCM(id, cmData);
+        CMCache.update(id, result);
+        return result;
+    },
+
+    async delete(id) {
+        const result = await API.deleteCM(id);
+        CMCache.remove(id);
+        return result;
+    },
+
+    async search(keyword) {
+        const cms = await CMCache.get();
+        const lowerKeyword = keyword.toLowerCase();
+
+        return cms.filter(cm =>
+            cm.code.toLowerCase().includes(lowerKeyword) ||
+            cm.name.toLowerCase().includes(lowerKeyword) ||
+            cm.email.toLowerCase().includes(lowerKeyword) ||
+            cm.phone.includes(keyword)
+        );
+    },
+
+    async getActive() {
+        const cms = await CMCache.get();
+        return cms.filter(cm => cm.active === true);
+    },
+
+    invalidateCache() {
+        CMCache.invalidate();
+    }
+};
+
+// ===== UTILITY FUNCTIONS FOR CM =====
+
+// Get CM dropdown options for forms
+async function getCMOptions() {
+    const cms = await CMAPI.getActive();
+    return cms.map(cm => ({
+        value: cm.id,
+        label: `${cm.code} - ${cm.name}`
+    }));
+}
+
+// Validate CM data before save
+function validateCMData(cmData) {
+    const errors = [];
+
+    if (!cmData.code || cmData.code.trim() === '') {
+        errors.push('Mã CM không được để trống');
+    }
+
+    if (!cmData.name || cmData.name.trim() === '') {
+        errors.push('Tên CM không được để trống');
+    }
+
+    if (cmData.email && !isValidEmail(cmData.email)) {
+        errors.push('Email không hợp lệ');
+    }
+
+    if (cmData.phone && !isValidPhone(cmData.phone)) {
+        errors.push('Số điện thoại không hợp lệ');
+    }
+
+    return {
+        isValid: errors.length === 0,
+        errors: errors
+    };
+}
+
+// Check if CM can be deleted (has no classes)
+async function canDeleteCM(cmId) {
+    const classes = await API.getClasses();
+    const managedClasses = classes.filter(c => c.cmId === cmId);
+
+    return {
+        canDelete: managedClasses.length === 0,
+        classCount: managedClasses.length,
+        classes: managedClasses
+    };
+}
+
+// Get CM performance metrics
+async function getCMPerformanceMetrics(cmId) {
+    try {
+        const cm = await API.getCM(cmId);
+        const classes = await API.getClasses();
+        const cmClasses = classes.filter(c => c.cmId === cmId);
+
+        let totalStudents = 0;
+        let totalSessions = 0;
+        let completedSessions = 0;
+        let attendanceRecords = 0;
+        let presentCount = 0;
+
+        for (const cls of cmClasses) {
+            totalStudents += cls.students || 0;
+            const sessions = cls.sessions || [];
+            totalSessions += sessions.length;
+
+            for (const session of sessions) {
+                if (session.status === 'completed') {
+                    completedSessions++;
+                }
+
+                try {
+                    const records = await API.getAttendance(cls.id, session.date);
+                    attendanceRecords += records.length;
+                    presentCount += records.filter(r =>
+                        r.status === 'on-time' || r.status === 'late'
+                    ).length;
+                } catch (error) {
+                    console.error('Error loading attendance:', error);
+                }
+            }
+        }
+
+        const attendanceRate = attendanceRecords > 0
+            ? (presentCount / attendanceRecords * 100).toFixed(1)
+            : 0;
+
+        return {
+            cm: cm,
+            metrics: {
+                totalClasses: cmClasses.length,
+                totalStudents: totalStudents,
+                totalSessions: totalSessions,
+                completedSessions: completedSessions,
+                completionRate: totalSessions > 0
+                    ? (completedSessions / totalSessions * 100).toFixed(1)
+                    : 0,
+                attendanceRate: attendanceRate,
+                averageClassSize: cmClasses.length > 0
+                    ? (totalStudents / cmClasses.length).toFixed(1)
+                    : 0
+            }
+        };
+    } catch (error) {
+        console.error('Error calculating CM metrics:', error);
+        throw error;
+    }
+}
+
+// Helper: Validate email format
+function isValidEmail(email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+}
+
+// Helper: Validate phone format (Vietnam)
+function isValidPhone(phone) {
+    const phoneRegex = /^(0|\+84)[0-9]{9,10}$/;
+    return phoneRegex.test(phone.replace(/\s/g, ''));
 }

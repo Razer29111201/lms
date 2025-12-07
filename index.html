@@ -104,6 +104,7 @@
                     <li><a onclick="showClasses()"><i class="fas fa-chalkboard"></i> Lớp học</a></li>
                     <li><a onclick="showStudents()"><i class="fas fa-user-graduate"></i> Học sinh</a></li>
                     <li><a onclick="showTeachers()"><i class="fas fa-chalkboard-teacher"></i> Giáo viên</a></li>
+                    <li><a onclick="showCMs()"><i class="fas fa-user-shield"></i> Class Manager</a></li>
                 </ul>
             </aside>
 
@@ -147,6 +148,38 @@
                 </div>
 
                 <!-- CLASSES -->
+                <div id="cmsContent" class="content-section">
+                    <div class="page-header">
+                        <div class="page-header-left">
+                            <h1>Quản lý Class Manager</h1>
+                            <p>Danh sách Class Manager</p>
+                        </div>
+                        <div style="display: flex; gap: 12px;">
+                            <button class="btn btn-success btn-sm" onclick="exportCMs()">
+                                <i class="fas fa-file-excel"></i> Export
+                            </button>
+                            <button class="btn btn-primary" onclick="openAddCMModal()">
+                                <i class="fas fa-plus"></i> Thêm CM
+                            </button>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Mã CM</th>
+                                    <th>Họ tên</th>
+                                    <th>Email</th>
+                                    <th>SĐT</th>
+                                    <th>Số lớp quản lý</th>
+                                    <th>Trạng thái</th>
+                                    <th>Thao tác</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cmsTable"></tbody>
+                        </table>
+                    </div>
+                </div>
                 <div id="classesContent" class="content-section">
                     <div class="page-header">
                         <div class="page-header-left">
@@ -470,6 +503,91 @@
             <div class="modal-footer">
                 <button class="btn btn-outline" onclick="closeModal('teacherModal')">Hủy</button>
                 <button class="btn btn-primary" onclick="saveTeacher()">
+                    <i class="fas fa-save"></i> Lưu
+                </button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- CM DETAIL MODAL -->
+    <div id="cmDetailModal" class="modal">
+        <div class="modal-content large">
+            <div class="modal-header">
+                <h2><i class="fas fa-user-shield"></i> Chi tiết Class Manager</h2>
+                <button class="close-modal" onclick="closeModal('cmDetailModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="class-detail-header" id="cmDetailHeader"></div>
+
+                <div class="tabs">
+                    <button class="tab active" onclick="switchTab(event, 'cmClassesTab')">
+                        <i class="fas fa-chalkboard"></i> Các lớp quản lý
+                    </button>
+                    <button class="tab" onclick="switchTab(event, 'cmStatsTab')">
+                        <i class="fas fa-chart-bar"></i> Thống kê điểm danh
+                    </button>
+                </div>
+
+                <div id="cmClassesTab" class="tab-content active">
+                    <h3 style="margin-bottom: 20px;">Danh sách lớp học</h3>
+                    <div class="cards-grid" id="cmClassesList"></div>
+                </div>
+
+                <div id="cmStatsTab" class="tab-content">
+                    <h3 style="margin-bottom: 20px;">Thống kê điểm danh tổng hợp</h3>
+                    <div id="cmAttendanceStats"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ADD/EDIT CM MODAL -->
+    <div id="cmModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="cmModalTitle"><i class="fas fa-user-shield"></i> Thêm Class Manager</h2>
+                <button class="close-modal" onclick="closeModal('cmModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="cmId">
+                <div class="form-group">
+                    <label>Mã CM <span style="color: red;">*</span></label>
+                    <input type="text" class="form-control" id="cmCode" style="padding-left: 16px;"
+                        placeholder="VD: CM001">
+                </div>
+                <div class="form-group">
+                    <label>Họ và tên <span style="color: red;">*</span></label>
+                    <input type="text" class="form-control" id="cmName" style="padding-left: 16px;"
+                        placeholder="Nhập họ tên">
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" class="form-control" id="cmEmail" style="padding-left: 16px;"
+                        placeholder="cm@email.com">
+                </div>
+                <div class="form-group">
+                    <label>Số điện thoại</label>
+                    <input type="tel" class="form-control" id="cmPhone" style="padding-left: 16px;"
+                        placeholder="0123456789">
+                </div>
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle"></i>
+                    <div>
+                        <strong>Lưu ý:</strong>
+                        <p style="margin-top: 8px; font-size: 13px;">
+                            Class Manager có thể quản lý nhiều lớp học, theo dõi điểm danh và nhận xét học sinh.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeModal('cmModal')">Hủy</button>
+                <button class="btn btn-primary" onclick="saveCM()">
                     <i class="fas fa-save"></i> Lưu
                 </button>
             </div>
