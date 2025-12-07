@@ -1,4 +1,5 @@
 // ===== MAIN APPLICATION =====
+// ===== MAIN APPLICATION =====
 
 // Global State
 let currentUser = null;
@@ -57,7 +58,7 @@ async function login() {
         localStorage.setItem(CONFIG.SESSION_KEY, JSON.stringify(currentUser));
         showPage('mainApp');
         updateUserUI();
-        loadDashboard();
+        await loadDashboard();
         showLoginAlert('success', 'Đăng nhập thành công!');
     } else {
         showLoginAlert('error', 'Email hoặc mật khẩu không đúng');
@@ -146,9 +147,16 @@ async function showTeachers() {
 // ===== DASHBOARD =====
 async function loadDashboard() {
     try {
+        // Load all data
         classes = await API.getClasses();
         students = await API.getStudents();
         teachers = await API.getTeachers();
+
+        console.log('Dashboard loaded:', {
+            classes: classes.length,
+            students: students.length,
+            teachers: teachers.length
+        });
 
         // Filter based on role
         let filteredClasses = classes;
@@ -167,6 +175,7 @@ async function loadDashboard() {
         renderClassCards(filteredClasses.slice(0, 3), 'dashboardClasses');
     } catch (error) {
         console.error('Error loading dashboard:', error);
+        showAlert('error', 'Không thể tải dữ liệu dashboard');
     }
 }
 
@@ -175,6 +184,8 @@ async function loadClasses() {
     try {
         classes = await API.getClasses();
 
+        console.log('Classes loaded:', classes);
+
         let filteredClasses = classes;
         if (currentUser.role === 'teacher') {
             filteredClasses = classes.filter(c => c.teacherId === currentUser.teacherId);
@@ -182,45 +193,55 @@ async function loadClasses() {
             filteredClasses = classes.filter(c => c.cmId === currentUser.cmId);
         }
 
+        console.log('Filtered classes:', filteredClasses);
+
         renderClassCards(filteredClasses, 'classesGrid');
     } catch (error) {
         console.error('Error loading classes:', error);
+        showAlert('error', 'Không thể tải danh sách lớp học');
     }
 }
 
 function renderClassCards(classList, containerId) {
     const container = document.getElementById(containerId);
 
+    console.log('Rendering classes to', containerId, ':', classList);
+
+    if (!container) {
+        console.error('Container not found:', containerId);
+        return;
+    }
+
     if (!classList || classList.length === 0) {
         container.innerHTML = `
             <div style="grid-column: 1/-1; text-align: center; padding: 60px 20px; color: var(--text-light);">
                 <i class="fas fa-inbox" style="font-size: 64px; margin-bottom: 16px; opacity: 0.5;"></i>
                 <h3 style="font-size: 20px; margin-bottom: 8px;">Không có lớp học</h3>
-                <p>Chưa có lớp học nào</p>
+                <p>Chưa có lớp học nào. ${currentUser.role === 'admin' ? 'Nhấn "Thêm lớp" để tạo mới.' : ''}</p>
             </div>
         `;
         return;
     }
 
-    container.innerHTML = classList.map(cls => `
+    const html = classList.map(cls => `
         <div class="class-card" onclick="viewClassDetail(${cls.id})">
-            <div class="card-header ${cls.color}">
-                <h3>${cls.name}</h3>
-                <div class="class-code">Mã: ${cls.code}</div>
+            <div class="card-header ${cls.color || 'green'}">
+                <h3>${cls.name || 'Chưa có tên'}</h3>
+                <div class="class-code">Mã: ${cls.code || 'N/A'}</div>
             </div>
             <div class="card-body">
                 <div class="card-info">
                     <div class="card-info-item">
                         <i class="fas fa-user-tie"></i>
-                        <span>GV: ${cls.teacher}</span>
+                        <span>GV: ${cls.teacher || 'Chưa có'}</span>
                     </div>
                     <div class="card-info-item">
                         <i class="fas fa-user-shield"></i>
-                        <span>CM: ${cls.cm}</span>
+                        <span>CM: ${cls.cm || 'Chưa có'}</span>
                     </div>
                     <div class="card-info-item">
                         <i class="fas fa-users"></i>
-                        <span>${cls.students} học sinh</span>
+                        <span>${cls.students || 0} học sinh</span>
                     </div>
                     <div class="card-info-item">
                         <i class="fas fa-calendar"></i>
@@ -228,7 +249,7 @@ function renderClassCards(classList, containerId) {
                     </div>
                     <div class="card-info-item">
                         <i class="fas fa-clock"></i>
-                        <span>${cls.schedule}</span>
+                        <span>${cls.schedule || 'Chưa có lịch'}</span>
                     </div>
                 </div>
                 <div class="card-footer">
@@ -247,13 +268,21 @@ function renderClassCards(classList, containerId) {
             </div>
         </div>
     `).join('');
+
+    container.innerHTML = html;
 }
 
 async function viewClassDetail(classId) {
     try {
         currentClassId = classId;
         const cls = classes.find(c => c.id === classId);
-        if (!cls) return;
+
+        console.log('View class detail:', classId, cls);
+
+        if (!cls) {
+            showAlert('error', 'Không tìm thấy lớp học');
+            return;
+        }
 
         // Render class header
         document.getElementById('classDetailHeader').innerHTML = `
@@ -277,6 +306,7 @@ async function viewClassDetail(classId) {
         openModal('classDetailModal');
     } catch (error) {
         console.error('Error viewing class detail:', error);
+        showAlert('error', 'Không thể xem chi tiết lớp học');
     }
 }
 
@@ -289,7 +319,51 @@ async function renderClassStudents(classId) {
         return;
     }
 
-    container.innerHTML = classStudents.map(s => `
+    // Load all attendance for this class to calculate stats
+    const cls = classes.find(c => c.id === classId);
+    const attendanceStats = {};
+
+    // Initialize stats for each student
+    classStudents.forEach(s => {
+        attendanceStats[s.id] = {
+            onTime: 0,
+            late: 0,
+            excused: 0,
+            absent: 0
+        };
+    });
+
+    // Load attendance for all sessions
+    try {
+        for (let session = 1; session <= (cls?.sessions || 15); session++) {
+            const records = await API.getAttendance(classId, session);
+            records.forEach(record => {
+                const studentId = parseInt(record.studentid || record.studentId);
+                if (attendanceStats[studentId]) {
+                    switch (record.status) {
+                        case 'on-time':
+                            attendanceStats[studentId].onTime++;
+                            break;
+                        case 'late':
+                            attendanceStats[studentId].late++;
+                            break;
+                        case 'excused':
+                            attendanceStats[studentId].excused++;
+                            break;
+                        case 'absent':
+                            attendanceStats[studentId].absent++;
+                            break;
+                    }
+                }
+            });
+        }
+    } catch (error) {
+        console.error('Error loading attendance stats:', error);
+    }
+
+    container.innerHTML = classStudents.map(s => {
+        const stats = attendanceStats[s.id] || { onTime: 0, late: 0, excused: 0, absent: 0 };
+        return `
         <div class="student-item">
             <div class="student-avatar">${getInitials(s.name)}</div>
             <div class="student-info">
@@ -297,28 +371,98 @@ async function renderClassStudents(classId) {
                 <p>MSSV: ${s.code} • ${s.email}</p>
             </div>
             <div class="student-stats">
-                <div class="student-stat"><strong style="color: #10b981;">7</strong><span>Đúng giờ</span></div>
-                <div class="student-stat"><strong style="color: #f59e0b;">1</strong><span>Muộn</span></div>
-                <div class="student-stat"><strong style="color: #06b6d4;">0</strong><span>Có phép</span></div>
-                <div class="student-stat"><strong style="color: #ef4444;">0</strong><span>Vắng</span></div>
+                <div class="student-stat"><strong style="color: #10b981;">${stats.onTime}</strong><span>Đúng giờ</span></div>
+                <div class="student-stat"><strong style="color: #f59e0b;">${stats.late}</strong><span>Muộn</span></div>
+                <div class="student-stat"><strong style="color: #06b6d4;">${stats.excused}</strong><span>Có phép</span></div>
+                <div class="student-stat"><strong style="color: #ef4444;">${stats.absent}</strong><span>Vắng</span></div>
             </div>
         </div>
-    `).join('');
+    `}).join('');
 }
 
-function renderSessionsGrid(totalSessions) {
+async function renderSessionsGrid(totalSessions) {
+    const container = document.getElementById('sessionsGrid');
+
+    // Load attendance stats for each session
+    const sessionStats = {};
+
+    try {
+        for (let i = 1; i <= totalSessions; i++) {
+            const records = await API.getAttendance(currentClassId, i);
+            sessionStats[i] = {
+                onTime: records.filter(r => r.status === 'on-time').length,
+                late: records.filter(r => r.status === 'late').length,
+                excused: records.filter(r => r.status === 'excused').length,
+                absent: records.filter(r => r.status === 'absent').length
+            };
+        }
+    } catch (error) {
+        console.error('Error loading session stats:', error);
+    }
+
     let html = '';
     for (let i = 1; i <= totalSessions; i++) {
+        const stats = sessionStats[i] || { onTime: 0, late: 0, excused: 0, absent: 0 };
+        const hasData = stats.onTime + stats.late + stats.excused + stats.absent > 0;
+
         html += `
             <div class="session-card ${i === 1 ? 'active' : ''}" onclick="selectSession(${i})">
                 <h4>Buổi ${i}</h4>
-                <p>${i <= 8 ? 'Đã học' : 'Chưa học'}</p>
+                <p>${hasData ? 'Đã điểm danh' : 'Chưa điểm danh'}</p>
+                ${hasData ? `
+                    <div class="session-stats">
+                        <div class="session-stat">
+                            <span>${stats.onTime}</span>
+                            <span>✓</span>
+                        </div>
+                        <div class="session-stat">
+                            <span>${stats.late}</span>
+                            <span>⏰</span>
+                        </div>
+                        <div class="session-stat">
+                            <span>${stats.absent}</span>
+                            <span>✗</span>
+                        </div>
+                    </div>
+                ` : ''}
             </div>
         `;
     }
-    document.getElementById('sessionsGrid').innerHTML = html;
-    renderAttendanceTable(1);
+
+    container.innerHTML = html;
+    await renderAttendanceTable(1);
 }
+
+// Add CSS for session stats if not already in styles.css
+const sessionStatsStyle = `
+.session-stats {
+    display: flex;
+    justify-content: space-around;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(0,0,0,0.1);
+}
+
+.session-card.active .session-stats {
+    border-top-color: rgba(255,255,255,0.3);
+}
+
+.session-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.session-stat span:first-child {
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.session-stat span:last-child {
+    font-size: 11px;
+    opacity: 0.8;
+}
+`;
 
 function selectSession(session) {
     currentSession = session;
@@ -330,6 +474,26 @@ function selectSession(session) {
 async function renderAttendanceTable(session) {
     const classStudents = students.filter(s => s.classId === currentClassId);
     const container = document.getElementById('attendanceTableContainer');
+
+    // Load existing attendance data for this session
+    let attendanceRecords = [];
+    try {
+        attendanceRecords = await API.getAttendance(currentClassId, session);
+        console.log('Loaded attendance records:', attendanceRecords);
+    } catch (error) {
+        console.error('Error loading attendance:', error);
+    }
+
+    // Create a map for quick lookup
+    const attendanceMap = {};
+    attendanceRecords.forEach(record => {
+        attendanceMap[record.studentid || record.studentId] = {
+            status: record.status,
+            note: record.note
+        };
+    });
+
+    console.log('Attendance map:', attendanceMap);
 
     container.innerHTML = `
         <div style="padding: 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
@@ -349,30 +513,32 @@ async function renderAttendanceTable(session) {
                 </tr>
             </thead>
             <tbody>
-                ${classStudents.map((s, i) => `
+                ${classStudents.map((s, i) => {
+        const attendance = attendanceMap[s.id] || { status: 'on-time', note: '' };
+        return `
                     <tr>
                         <td>${i + 1}</td>
                         <td>${s.name}</td>
                         <td>${s.code}</td>
                         <td>
                             <div class="attendance-status">
-                                <button class="status-btn on-time ${i % 4 === 0 ? 'active' : ''}" onclick="setAttendance(this)">
+                                <button class="status-btn on-time ${attendance.status === 'on-time' ? 'active' : ''}" onclick="setAttendance(this)">
                                     <i class="fas fa-check"></i> Đúng giờ
                                 </button>
-                                <button class="status-btn late" onclick="setAttendance(this)">
+                                <button class="status-btn late ${attendance.status === 'late' ? 'active' : ''}" onclick="setAttendance(this)">
                                     <i class="fas fa-clock"></i> Muộn
                                 </button>
-                                <button class="status-btn excused" onclick="setAttendance(this)">
+                                <button class="status-btn excused ${attendance.status === 'excused' ? 'active' : ''}" onclick="setAttendance(this)">
                                     <i class="fas fa-file-alt"></i> Có phép
                                 </button>
-                                <button class="status-btn absent" onclick="setAttendance(this)">
+                                <button class="status-btn absent ${attendance.status === 'absent' ? 'active' : ''}" onclick="setAttendance(this)">
                                     <i class="fas fa-times"></i> Vắng
                                 </button>
                             </div>
                         </td>
-                        <td><input type="text" class="note-input" placeholder="Ghi chú..." data-student-id="${s.id}"></td>
+                        <td><input type="text" class="note-input" placeholder="Ghi chú..." value="${attendance.note || ''}" data-student-id="${s.id}"></td>
                     </tr>
-                `).join('')}
+                `}).join('')}
             </tbody>
         </table>
     `;
@@ -410,12 +576,22 @@ async function saveAttendance() {
         showAlert('success', 'Đã lưu điểm danh thành công!');
     } catch (error) {
         console.error('Error saving attendance:', error);
+        showAlert('error', 'Không thể lưu điểm danh');
     }
 }
 
 async function renderCommentsTab(classId) {
     const classStudents = students.filter(s => s.classId === classId);
     const container = document.getElementById('commentsStudentsList');
+
+    // Load existing comments
+    let existingComments = {};
+    try {
+        existingComments = await API.getComments(classId);
+        console.log('Loaded comments:', existingComments);
+    } catch (error) {
+        console.error('Error loading comments:', error);
+    }
 
     container.innerHTML = classStudents.map(s => `
         <div class="student-item" style="flex-direction: column; align-items: flex-start;">
@@ -426,7 +602,7 @@ async function renderCommentsTab(classId) {
                     <p>MSSV: ${s.code}</p>
                 </div>
             </div>
-            <textarea class="note-input" rows="3" placeholder="Nhận xét về học sinh..." data-student-id="${s.id}"></textarea>
+            <textarea class="note-input" rows="3" placeholder="Nhận xét về học sinh..." data-student-id="${s.id}">${existingComments[s.id] || ''}</textarea>
         </div>
     `).join('');
 }
@@ -443,6 +619,7 @@ async function saveComments() {
         showAlert('success', 'Đã lưu nhận xét thành công!');
     } catch (error) {
         console.error('Error saving comments:', error);
+        showAlert('error', 'Không thể lưu nhận xét');
     }
 }
 
@@ -490,8 +667,8 @@ async function saveClass() {
             return;
         }
 
-        const teacherId = parseInt(document.getElementById('classTeacher').value);
-        const cmId = parseInt(document.getElementById('classCM').value);
+        const teacherId = parseInt(document.getElementById('classTeacher').value) || 0;
+        const cmId = parseInt(document.getElementById('classCM').value) || 0;
         const teacher = teachers.find(t => t.id === teacherId);
         const cm = teachers.find(t => t.id === cmId);
 
@@ -510,11 +687,15 @@ async function saveClass() {
             color: CONFIG.CARD_COLORS[Math.floor(Math.random() * CONFIG.CARD_COLORS.length)]
         };
 
+        console.log('Saving class:', classData);
+
         if (id) {
+            classData.id = parseInt(id);
             await API.updateClass(parseInt(id), classData);
             showAlert('success', 'Đã cập nhật lớp học thành công!');
         } else {
-            await API.createClass(classData);
+            const newClass = await API.createClass(classData);
+            console.log('Class created:', newClass);
             showAlert('success', 'Đã thêm lớp học mới thành công!');
         }
 
@@ -563,9 +744,14 @@ async function populateCMSelect() {
 async function loadStudents() {
     try {
         students = await API.getStudents();
+        // Reload classes to populate select
+        if (classes.length === 0) {
+            classes = await API.getClasses();
+        }
         renderStudentsTable();
     } catch (error) {
         console.error('Error loading students:', error);
+        showAlert('error', 'Không thể tải danh sách học sinh');
     }
 }
 
@@ -597,14 +783,14 @@ function renderStudentsTable() {
     `).join('');
 }
 
-function openAddStudentModal() {
+async function openAddStudentModal() {
     document.getElementById('studentModalTitle').innerHTML = '<i class="fas fa-user-plus"></i> Thêm học sinh';
     document.getElementById('studentId').value = '';
     document.getElementById('studentCode').value = '';
     document.getElementById('studentName').value = '';
     document.getElementById('studentEmail').value = '';
     document.getElementById('studentPhone').value = '';
-    populateClassesSelect();
+    await populateClassesSelect();
     openModal('studentModal');
 }
 
@@ -634,7 +820,7 @@ async function saveStudent() {
             return;
         }
 
-        const classId = parseInt(document.getElementById('studentClass').value);
+        const classId = parseInt(document.getElementById('studentClass').value) || 0;
         const cls = classes.find(c => c.id === classId);
 
         const studentData = {
@@ -647,6 +833,7 @@ async function saveStudent() {
         };
 
         if (id) {
+            studentData.id = parseInt(id);
             await API.updateStudent(parseInt(id), studentData);
             showAlert('success', 'Đã cập nhật học sinh thành công!');
         } else {
@@ -681,10 +868,14 @@ async function populateClassesSelect() {
     if (classes.length === 0) {
         classes = await API.getClasses();
     }
+
+    console.log('Populating classes select:', classes);
+
     const html = '<option value="">Chọn lớp học</option>' +
         classes.map(c => `<option value="${c.id}">${c.code} - ${c.name}</option>`).join('');
     document.getElementById('studentClass').innerHTML = html;
 }
+
 
 // ===== TEACHERS =====
 async function loadTeachers() {

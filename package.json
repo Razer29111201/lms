@@ -1,0 +1,25 @@
+{
+  "name": "test",
+  "version": "1.0.0",
+  "description": "a",
+  "homepage": "https://github.com/Razer29111201/lms#readme",
+  "bugs": {
+    "url": "https://github.com/Razer29111201/lms/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Razer29111201/lms.git"
+  },
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "api.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "type": "module"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "node-fetch": "^3.3.2"
+  }
+}

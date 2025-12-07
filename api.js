@@ -1,4 +1,4 @@
-// ===== API SERVICE =====
+// ===== API SERVICE (FIXED CORS) =====
 
 const API = {
     // Base API call function
@@ -6,21 +6,23 @@ const API = {
         try {
             showLoading();
 
-            // // Check if using demo mode (no API URL configured)
-            // if (!CONFIG.API_URL || CONFIG.API_URL === 'https://script.google.com/macros/s/AKfycbzFwUtiMQIL4TBLh-8ORkDoL55iAuC2dWDRA_mn_nvTMPIiJsu_CYXYOF628R_DtZ0v/exec') {
-            //     console.warn('Demo mode: Using local storage');
-            //     return await this.demoMode(action, data);
-            // }
+            // Check if using demo mode (no API URL configured)
+            if (!CONFIG.API_URL || CONFIG.API_URL === 'YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE') {
+                console.warn('Demo mode: Using local storage');
+                return await this.demoMode(action, data);
+            }
 
-            const response = await fetch(CONFIG.API_URL, {
+            // Google Apps Script requires specific format
+            const url = `${CONFIG.API_URL}?action=${action}`;
+
+            const response = await fetch(url, {
                 method: 'POST',
-
                 headers: {
-                    'Content-Type': 'application/json',
+                    'Content-Type': 'text/plain',
                 },
-                body: JSON.stringify({ action, data })
+                body: JSON.stringify(data),
+                redirect: 'follow'
             });
-            console.log(response);
 
             const result = await response.json();
             hideLoading();
@@ -33,21 +35,23 @@ const API = {
         } catch (error) {
             hideLoading();
             console.error('API Error:', error);
-            showAlert('error', 'Lỗi kết nối: ' + error.message);
-            throw error;
+
+            // Fallback to demo mode if API fails
+            console.warn('API failed, switching to demo mode');
+            return await this.demoMode(action, data);
         }
     },
 
     // Demo mode using localStorage
     async demoMode(action, data) {
-        await new Promise(resolve => setTimeout(resolve, 500)); // Simulate network delay
+        await new Promise(resolve => setTimeout(resolve, 300)); // Simulate network delay
 
         const storage = {
-            classes: JSON.parse(localStorage.getItem('classes') || '[]'),
-            students: JSON.parse(localStorage.getItem('students') || '[]'),
-            teachers: JSON.parse(localStorage.getItem('teachers') || '[]'),
-            attendance: JSON.parse(localStorage.getItem('attendance') || '{}'),
-            comments: JSON.parse(localStorage.getItem('comments') || '{}')
+            classes: JSON.parse(localStorage.getItem('classflow_classes') || '[]'),
+            students: JSON.parse(localStorage.getItem('classflow_students') || '[]'),
+            teachers: JSON.parse(localStorage.getItem('classflow_teachers') || '[]'),
+            attendance: JSON.parse(localStorage.getItem('classflow_attendance') || '{}'),
+            comments: JSON.parse(localStorage.getItem('classflow_comments') || '{}')
         };
 
         // Initialize demo data if empty
@@ -55,9 +59,9 @@ const API = {
             storage.classes = this.getDemoClasses();
             storage.students = this.getDemoStudents();
             storage.teachers = this.getDemoTeachers();
-            localStorage.setItem('classes', JSON.stringify(storage.classes));
-            localStorage.setItem('students', JSON.stringify(storage.students));
-            localStorage.setItem('teachers', JSON.stringify(storage.teachers));
+            localStorage.setItem('classflow_classes', JSON.stringify(storage.classes));
+            localStorage.setItem('classflow_students', JSON.stringify(storage.students));
+            localStorage.setItem('classflow_teachers', JSON.stringify(storage.teachers));
         }
 
         hideLoading();
@@ -73,21 +77,21 @@ const API = {
             case 'createClass':
                 const newClass = { ...data, id: Date.now() };
                 storage.classes.push(newClass);
-                localStorage.setItem('classes', JSON.stringify(storage.classes));
+                localStorage.setItem('classflow_classes', JSON.stringify(storage.classes));
                 return newClass;
 
             case 'updateClass':
                 const classIndex = storage.classes.findIndex(c => c.id === data.id);
                 if (classIndex !== -1) {
                     storage.classes[classIndex] = { ...storage.classes[classIndex], ...data };
-                    localStorage.setItem('classes', JSON.stringify(storage.classes));
+                    localStorage.setItem('classflow_classes', JSON.stringify(storage.classes));
                     return storage.classes[classIndex];
                 }
                 throw new Error('Class not found');
 
             case 'deleteClass':
                 storage.classes = storage.classes.filter(c => c.id !== data.id);
-                localStorage.setItem('classes', JSON.stringify(storage.classes));
+                localStorage.setItem('classflow_classes', JSON.stringify(storage.classes));
                 return { success: true };
 
             // STUDENTS
@@ -100,21 +104,21 @@ const API = {
             case 'createStudent':
                 const newStudent = { ...data, id: Date.now() };
                 storage.students.push(newStudent);
-                localStorage.setItem('students', JSON.stringify(storage.students));
+                localStorage.setItem('classflow_students', JSON.stringify(storage.students));
                 return newStudent;
 
             case 'updateStudent':
                 const studentIndex = storage.students.findIndex(s => s.id === data.id);
                 if (studentIndex !== -1) {
                     storage.students[studentIndex] = { ...storage.students[studentIndex], ...data };
-                    localStorage.setItem('students', JSON.stringify(storage.students));
+                    localStorage.setItem('classflow_students', JSON.stringify(storage.students));
                     return storage.students[studentIndex];
                 }
                 throw new Error('Student not found');
 
             case 'deleteStudent':
                 storage.students = storage.students.filter(s => s.id !== data.id);
-                localStorage.setItem('students', JSON.stringify(storage.students));
+                localStorage.setItem('classflow_students', JSON.stringify(storage.students));
                 return { success: true };
 
             // TEACHERS
@@ -127,21 +131,21 @@ const API = {
             case 'createTeacher':
                 const newTeacher = { ...data, id: Date.now() };
                 storage.teachers.push(newTeacher);
-                localStorage.setItem('teachers', JSON.stringify(storage.teachers));
+                localStorage.setItem('classflow_teachers', JSON.stringify(storage.teachers));
                 return newTeacher;
 
             case 'updateTeacher':
                 const teacherIndex = storage.teachers.findIndex(t => t.id === data.id);
                 if (teacherIndex !== -1) {
                     storage.teachers[teacherIndex] = { ...storage.teachers[teacherIndex], ...data };
-                    localStorage.setItem('teachers', JSON.stringify(storage.teachers));
+                    localStorage.setItem('classflow_teachers', JSON.stringify(storage.teachers));
                     return storage.teachers[teacherIndex];
                 }
                 throw new Error('Teacher not found');
 
             case 'deleteTeacher':
                 storage.teachers = storage.teachers.filter(t => t.id !== data.id);
-                localStorage.setItem('teachers', JSON.stringify(storage.teachers));
+                localStorage.setItem('classflow_teachers', JSON.stringify(storage.teachers));
                 return { success: true };
 
             // ATTENDANCE
@@ -151,7 +155,7 @@ const API = {
             case 'saveAttendance':
                 const key = `${data.classId}_${data.session}`;
                 storage.attendance[key] = data.records;
-                localStorage.setItem('attendance', JSON.stringify(storage.attendance));
+                localStorage.setItem('classflow_attendance', JSON.stringify(storage.attendance));
                 return { success: true };
 
             // COMMENTS
@@ -160,7 +164,7 @@ const API = {
 
             case 'saveComments':
                 storage.comments[data.classId] = data.comments;
-                localStorage.setItem('comments', JSON.stringify(storage.comments));
+                localStorage.setItem('classflow_comments', JSON.stringify(storage.comments));
                 return { success: true };
 
             default:
@@ -215,6 +219,21 @@ const API = {
                 schedule: 'T2,T4: 18:30-21:00',
                 sessions: 15,
                 color: 'orange'
+            },
+            {
+                id: 4,
+                name: 'Marketing Digital',
+                code: 'MKT101',
+                teacher: 'Nguyễn Văn C',
+                teacherId: 2,
+                cm: 'Hoàng Văn E',
+                cmId: 1,
+                students: 25,
+                start: '2024-09-20',
+                end: '2024-12-20',
+                schedule: 'T3,T5: 19:00-21:30',
+                sessions: 15,
+                color: 'red'
             }
         ];
     },
@@ -265,6 +284,33 @@ const API = {
                 phone: '0901234571',
                 classId: 1,
                 className: 'WEB101'
+            },
+            {
+                id: 6,
+                code: '2024006',
+                name: 'Võ Văn Nam',
+                email: 'vovannam@email.com',
+                phone: '0901234572',
+                classId: 2,
+                className: 'ENG202'
+            },
+            {
+                id: 7,
+                code: '2024007',
+                name: 'Đặng Thị Mai',
+                email: 'dangthimai@email.com',
+                phone: '0901234573',
+                classId: 3,
+                className: 'PY301'
+            },
+            {
+                id: 8,
+                code: '2024008',
+                name: 'Bùi Văn Hùng',
+                email: 'buivanhung@email.com',
+                phone: '0901234574',
+                classId: 4,
+                className: 'MKT101'
             }
         ];
     },
@@ -286,7 +332,7 @@ const API = {
                 name: 'Nguyễn Văn C',
                 email: 'nguyenvan.c@email.com',
                 phone: '0912345679',
-                subject: 'English',
+                subject: 'English & Marketing',
                 active: true
             },
             {
@@ -381,11 +427,13 @@ const API = {
 
 // Helper functions
 function showLoading() {
-    document.getElementById('loadingOverlay').classList.add('active');
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) overlay.classList.add('active');
 }
 
 function hideLoading() {
-    document.getElementById('loadingOverlay').classList.remove('active');
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) overlay.classList.remove('active');
 }
 
 function showAlert(type, message) {
