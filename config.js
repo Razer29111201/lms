@@ -1,14 +1,11 @@
-// ===== CONFIGURATION =====
-
-// Google Apps Script Web App URL
-// Thay thế URL này bằng URL Web App của bạn sau khi deploy
 const CONFIG = {
-    API_URL: 'https://script.google.com/macros/s/AKfycbzFwUtiMQIL4TBLh-8ORkDoL55iAuC2dWDRA_mn_nvTMPIiJsu_CYXYOF628R_DtZ0v/exec',
-    // Ví dụ: 'https://script.google.com/macros/s/AKfycby.../exec'
+    // Thay đổi URL này để trỏ đến backend Express.js
+    API_URL: 'https://backend-lms-y0yb.onrender.com/api',
+    // Hoặc khi deploy production: 'https://your-domain.com/api'
 
     // App Settings
     APP_NAME: 'ClassFlow',
-    APP_VERSION: '1.0.0',
+    APP_VERSION: '2.0.0',
 
     // Session Settings
     SESSION_KEY: 'classflow_user',
@@ -20,7 +17,7 @@ const CONFIG = {
     // Colors for class cards
     CARD_COLORS: ['green', 'blue', 'orange', 'red'],
 
-    // Demo Users (Xóa sau khi production)
+    // Demo Users (xóa khi production)
     DEMO_USERS: {
         admin: {
             email: 'admin@classflow.com',
@@ -48,7 +45,6 @@ const CONFIG = {
     }
 };
 
-// Export for use in other files
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = CONFIG;
 }
