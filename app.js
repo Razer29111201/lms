@@ -137,7 +137,12 @@ async function login() {
                 timestamp: Date.now()
             };
 
-            localStorage.setItem(CONFIG.SESSION_KEY, JSON.stringify(currentUser));
+            const result = await API.login(email, password);
+
+            localStorage.setItem(CONFIG.SESSION_KEY, JSON.stringify({
+                token: result.token,
+                user: result.user
+            }));
 
             hideLoading();
             showPage('mainApp');

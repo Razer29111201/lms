@@ -10,10 +10,20 @@ const CONFIG = {
 const API = {
     async call(endpoint, method = 'GET', data = null) {
         try {
-            const options = {
-                method,
-                headers: { 'Content-Type': 'application/json' }
+            const tokenData = localStorage.getItem(CONFIG.SESSION_KEY);
+            const tokenObj = tokenData ? JSON.parse(tokenData) : null;
+            const token = tokenObj?.token;
+
+            const headers = {
+                'Content-Type': 'application/json'
             };
+
+            // 🔥 Thêm token vào header
+            if (token) {
+                headers['Authorization'] = 'Bearer ' + token;
+            }
+
+            const options = { method, headers };
 
             if (data && (method === 'POST' || method === 'PUT')) {
                 options.body = JSON.stringify(data);
@@ -29,13 +39,14 @@ const API = {
                 throw new Error(errorData.error || `HTTP ${response.status}`);
             }
 
-            const result = await response.json();
-            return result;
+            return await response.json();
+
         } catch (error) {
             console.error('❌ API Error:', error);
             throw error;
         }
-    },
+    }
+    ,
 
     async login(email, password) {
         const response = await this.call('/auth/login', 'POST', { email, password });
