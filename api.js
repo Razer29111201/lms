@@ -1,8 +1,8 @@
 // api.js - SINGLE SOURCE OF TRUTH
 
 const CONFIG = {
-    // API_URL: 'https://backend-lms-y0yb.onrender.com/api'
-    API_URL: 'http://localhost:8080/api',
+    API_URL: 'https://backend-lms-y0yb.onrender.com/api',
+    // API_URL: 'http://localhost:8080/api',
     SESSION_KEY: 'lms_session',
     SESSION_TIMEOUT: 1000 * 60 * 60 * 24,
     CARD_COLORS: ['green', 'blue', 'purple', 'orange', 'red', 'cyan']
