@@ -1954,7 +1954,7 @@ function getInitials(name) {
 
 function getWeekdayName(day) {
     const days = ['Chủ nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
-    return typeof day === 'number' ? days[day] : (days[parseInt(day)] || '');
+    return typeof day === 'number' ? days[day] : (days[parseInt(day)] || 'Chủ nhật');
 }
 
 function generateDefaultSessions(startDate, weekDay, total = 15) {
