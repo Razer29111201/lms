@@ -1,5 +1,5 @@
-// app.js - Phiên bản "MỚI" (startDate, weekDay, timeSlot, CM từ CMAPI)
-// Ghi chú: các hàm có comment tiếng Việt, mô tả nhiệm vụ từng đoạn giúp bảo trì dễ dàng.
+// app.js - Role system với số (0=Admin, 1=Teacher, 2=CM)
+// Refactored version với đầy đủ functions
 
 // ===== GLOBAL STATE =====
 let currentUser = null;
@@ -10,7 +10,73 @@ let cms = [];
 let currentClassId = null;
 let currentSessionDate = null;
 let currentSessionNumber = 1;
-let sessionCache = {};      // cache sessions theo class để tránh gọi API nhiều lần
+let sessionCache = {};
+
+// ===== ROLE CONSTANTS =====
+const ROLES = {
+    ADMIN: 0,
+    TEACHER: 1,
+    CM: 2
+};
+
+const ROLE_NAMES = {
+    0: 'admin',
+    1: 'teacher',
+    2: 'cm'
+};
+
+const ROLE_DISPLAY = {
+    0: 'Admin',
+    1: 'Giáo viên',
+    2: 'Class Manager'
+};
+
+// ===== PERMISSIONS SYSTEM =====
+const PERMISSIONS = {
+    0: { // Admin
+        classes: { view: true, create: true, edit: true, delete: true },
+        students: { view: true, create: true, edit: true, delete: true },
+        teachers: { view: true, create: true, edit: true, delete: true },
+        cms: { view: true, create: true, edit: true, delete: true },
+        attendance: { view: true, edit: true },
+        comments: { view: true, edit: true },
+        export: true
+    },
+    1: { // Teacher
+        classes: { view: true, create: false, edit: false, delete: false },
+        students: { view: true, create: false, edit: false, delete: false },
+        teachers: { view: false, create: false, edit: false, delete: false },
+        cms: { view: false, create: false, edit: false, delete: false },
+        attendance: { view: true, edit: true },
+        comments: { view: true, edit: true },
+        export: true
+    },
+    2: { // CM
+        classes: { view: true, create: true, edit: true, delete: true },
+        students: { view: true, create: true, edit: true, delete: true },
+        teachers: { view: true, create: false, edit: false, delete: false },
+        cms: { view: true, create: false, edit: false, delete: false },
+        attendance: { view: true, edit: false },
+        comments: { view: true, edit: false },
+        export: true
+    }
+};
+
+// ===== PERMISSION HELPER =====
+function hasPermission(action, resource, operation = 'view') {
+    if (!currentUser) return false;
+
+    const roleNum = currentUser.roleNum ?? parseInt(currentUser.role);
+    const userPermissions = PERMISSIONS[roleNum];
+
+    if (!userPermissions) return false;
+
+    if (action === 'export') {
+        return userPermissions.export === true;
+    }
+
+    return userPermissions[resource] && userPermissions[resource][operation] === true;
+}
 
 // ===== INITIALIZATION =====
 document.addEventListener('DOMContentLoaded', () => {
@@ -18,7 +84,6 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ===== AUTHENTICATION & SESSION =====
-// Kiểm tra session lưu trong localStorage (CONFIG.SESSION_KEY)
 function checkSession() {
     const saved = localStorage.getItem(CONFIG.SESSION_KEY);
     if (!saved) {
@@ -44,8 +109,9 @@ function checkSession() {
         showPage('loginPage');
     }
 }
-// Login demo or real
+
 async function login() {
+    // ✅ GET VALUES FROM INPUT FIELDS
     const email = document.getElementById('loginEmail').value.trim();
     const password = document.getElementById('loginPassword').value;
 
@@ -54,31 +120,47 @@ async function login() {
         return;
     }
 
-    // Demo users fallback
-    const demoUser = Object.values(CONFIG.DEMO_USERS || {}).find(
-        u => u.email === email && u.password === password
-    );
+    try {
+        showLoading();
 
-    if (demoUser) {
-        currentUser = { ...demoUser, timestamp: Date.now() };
-        localStorage.setItem(CONFIG.SESSION_KEY, JSON.stringify(currentUser));
-        showPage('mainApp');
-        updateUserUI();
-        await loadDashboard();
-        showLoginAlert('success', 'Đăng nhập thành công');
+        // Call API
+        const response = await API.login(email, password);
 
-        // Redirect based on role
-        setTimeout(() => {
-            if (currentUser.role === 'teacher' || currentUser.role === 'cm') {
-                showClasses();
-            } else {
-                showDashboard();
-            }
-        }, 500);
-        return;
+        if (response && response.user) {
+            const roleNum = parseInt(response.user.role);
+            const roleName = ROLE_NAMES[roleNum] || 'admin';
+
+            currentUser = {
+                ...response.user,
+                role: roleName,
+                roleNum: roleNum,
+                timestamp: Date.now()
+            };
+
+            localStorage.setItem(CONFIG.SESSION_KEY, JSON.stringify(currentUser));
+
+            hideLoading();
+            showPage('mainApp');
+            updateUserUI();
+            await loadDashboard();
+            showLoginAlert('success', 'Đăng nhập thành công');
+
+            setTimeout(() => {
+                if (roleNum === ROLES.TEACHER || roleNum === ROLES.CM) {
+                    showClasses();
+                } else {
+                    showDashboard();
+                }
+            }, 500);
+        } else {
+            hideLoading();
+            showLoginAlert('error', 'Email hoặc mật khẩu không đúng');
+        }
+    } catch (error) {
+        hideLoading();
+        console.error('Login error:', error);
+        showLoginAlert('error', 'Đăng nhập thất bại. Vui lòng thử lại.');
     }
-
-    showLoginAlert('error', 'Email hoặc mật khẩu không đúng');
 }
 
 function logout() {
@@ -97,7 +179,6 @@ function showLoginAlert(type, msg) {
     el.style.display = 'flex';
     setTimeout(() => { el.style.display = 'none'; }, 3000);
 }
-
 
 // ===== UI NAVIGATION HELPERS =====
 function showPage(pageId) {
@@ -126,15 +207,59 @@ function setSidebarActive(index) {
 // ===== USER UI =====
 function updateUserUI() {
     if (!currentUser) return;
+
     const nameEl = document.getElementById('userName');
     const avatarEl = document.getElementById('userAvatar');
     const roleEl = document.getElementById('userRole');
+
     if (nameEl) nameEl.textContent = currentUser.name || '';
-    if (avatarEl) avatarEl.textContent = (currentUser.avatar || '').slice(0, 1).toUpperCase();
+    if (avatarEl) avatarEl.textContent = (currentUser.avatar || currentUser.name || '').slice(0, 1).toUpperCase();
+
     if (roleEl) {
-        roleEl.className = `badge badge-${currentUser.role || 'default'}`;
-        roleEl.textContent = currentUser.role === 'admin' ? 'Admin' : (currentUser.role === 'teacher' ? 'Giáo viên' : 'Class Manager');
+        const roleNum = currentUser.roleNum ?? parseInt(currentUser.role);
+        const roleName = ROLE_NAMES[roleNum] || 'admin';
+
+        roleEl.className = `badge badge-${roleName}`;
+        roleEl.textContent = ROLE_DISPLAY[roleNum] || 'Admin';
     }
+
+    // Update sidebar menu
+    updateSidebarMenu();
+}
+
+function updateSidebarMenu() {
+    const sidebar = document.querySelector('.sidebar-menu');
+    if (!sidebar) return;
+
+    const roleNum = currentUser?.roleNum ?? parseInt(currentUser?.role);
+
+    // Base menu structure
+    let menuHTML = '';
+
+    // Dashboard - always visible
+    menuHTML += '<li><a onclick="showDashboard()"><i class="fas fa-th-large"></i> Dashboard</a></li>';
+
+    // Classes - visible to all roles
+    menuHTML += '<li><a onclick="showClasses()"><i class="fas fa-chalkboard"></i> Lớp học</a></li>';
+
+    // Students - visible to all roles
+    menuHTML += '<li><a onclick="showStudents()"><i class="fas fa-user-graduate"></i> Học sinh</a></li>';
+
+    // Teachers - visible to admin and cm (role 0 and 2)
+    if (roleNum === ROLES.ADMIN || roleNum === ROLES.CM) {
+        menuHTML += '<li><a onclick="showTeachers()"><i class="fas fa-chalkboard-teacher"></i> Giáo viên</a></li>';
+    }
+
+    // CMs - only admin (role 0)
+    if (roleNum === ROLES.ADMIN) {
+        menuHTML += '<li><a onclick="showCMs()"><i class="fas fa-user-shield"></i> Class Manager</a></li>';
+    }
+
+    sidebar.innerHTML = menuHTML;
+
+    // Set active state for dashboard
+    const firstLink = sidebar.querySelector('li a');
+    if (firstLink) firstLink.classList.add('active');
 }
 
 // ===== DASHBOARD / LOADING DATA =====
@@ -150,9 +275,11 @@ async function loadDashboard() {
         ]);
 
         let filteredClasses = classes;
-        if (currentUser?.role === 'teacher') {
+        const roleNum = currentUser?.roleNum ?? parseInt(currentUser?.role);
+
+        if (roleNum === ROLES.TEACHER) {
             filteredClasses = classes.filter(c => c.teacherId === currentUser.teacherId);
-        } else if (currentUser?.role === 'cm') {
+        } else if (roleNum === ROLES.CM) {
             filteredClasses = classes.filter(c => c.cmId === currentUser.cmId);
         }
 
@@ -169,8 +296,13 @@ async function loadDashboard() {
     }
 }
 
+async function showDashboard() {
+    showContent('dashboardContent');
+    setSidebarActive(0);
+    await loadDashboard();
+}
+
 // ===== CLASSES =====
-// Load and render classes (classesContent)
 async function loadClasses() {
     try {
         showLoading();
@@ -178,9 +310,11 @@ async function loadClasses() {
 
         // Filter by role
         let filtered = classes;
-        if (currentUser?.role === 'teacher') {
+        const roleNum = currentUser?.roleNum ?? parseInt(currentUser?.role);
+
+        if (roleNum === ROLES.TEACHER) {
             filtered = classes.filter(c => c.teacherId === currentUser.teacherId);
-        } else if (currentUser?.role === 'cm') {
+        } else if (roleNum === ROLES.CM) {
             filtered = classes.filter(c => c.cmId === currentUser.cmId);
         }
 
@@ -192,6 +326,12 @@ async function loadClasses() {
         console.error('loadClasses error:', err);
         showAlert('error', 'Không thể tải danh sách lớp: ' + err.message);
     }
+}
+
+async function showClasses() {
+    showContent('classesContent');
+    setSidebarActive(1);
+    await loadClasses();
 }
 
 function renderClassCards(classList, containerId) {
@@ -207,7 +347,7 @@ function renderClassCards(classList, containerId) {
             <div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-light);">
                 <i class="fas fa-inbox" style="font-size:48px;opacity:0.4"></i>
                 <h3>Không có lớp học</h3>
-                <p>${currentUser?.role === 'admin' ? 'Nhấn "Thêm lớp" để tạo mới.' : ''}</p>
+                <p>${hasPermission('', 'classes', 'create') ? 'Nhấn "Thêm lớp" để tạo mới.' : ''}</p>
             </div>
         `;
         return;
@@ -235,10 +375,12 @@ function renderClassCards(classList, containerId) {
                     <button class="btn btn-primary" style="flex:1" onclick="event.stopPropagation(); window.viewClassDetail(${cls.id})">
                         <i class="fas fa-eye"></i> Chi tiết
                     </button>
-                    ${(currentUser?.role === 'admin' || currentUser?.role === 'cm') ? `
+                    ${hasPermission('', 'classes', 'edit') ? `
                         <button class="action-btn edit" onclick="event.stopPropagation(); window.editClass(${cls.id})" title="Chỉnh sửa">
                             <i class="fas fa-edit"></i>
                         </button>
+                    ` : ''}
+                    ${hasPermission('', 'classes', 'delete') ? `
                         <button class="action-btn delete" onclick="event.stopPropagation(); window.deleteClass(${cls.id})" title="Xóa">
                             <i class="fas fa-trash"></i>
                         </button>
@@ -251,9 +393,7 @@ function renderClassCards(classList, containerId) {
     container.innerHTML = html;
 }
 
-
-
-// Mở modal thêm lớp (đặt form rỗng)
+// Mở modal thêm lớp
 function openAddClassModal() {
     document.getElementById('classModalTitle').innerHTML = '<i class="fas fa-plus"></i> Thêm lớp học';
     document.getElementById('classId').value = '';
@@ -264,13 +404,12 @@ function openAddClassModal() {
     document.getElementById('classTimeSlot').value = '';
     document.getElementById('sessionsPreview').style.display = 'none';
 
-    // Populate selects
     populateTeachersSelect();
     populateCMSelect();
     openModal('classModal');
 }
 
-// Chỉnh sửa lớp: set giá trị vào form, đặc biệt set đúng ID cho classCM
+// Chỉnh sửa lớp
 async function editClass(classId) {
     try {
         const cls = classes.find(c => c.id === classId);
@@ -306,8 +445,7 @@ async function editClass(classId) {
     }
 }
 
-// Lưu lớp (tạo mới hoặc cập nhật)
-// LƯU Ý: lưu teacherId và cmId dưới dạng ID; server / API sẽ lưu tên nếu cần
+// Lưu lớp
 async function saveClass() {
     try {
         const id = document.getElementById('classId').value;
@@ -317,7 +455,6 @@ async function saveClass() {
         const weekDay = document.getElementById('classWeekDay').value;
         const timeSlot = document.getElementById('classTimeSlot').value.trim();
 
-        // Basic validation
         if (!name || !code) {
             showAlert('error', 'Vui lòng nhập tên lớp và mã lớp');
             return;
@@ -352,7 +489,7 @@ async function saveClass() {
             weekDay: parseInt(weekDay),
             timeSlot,
             color: CONFIG.CARD_COLORS[Math.floor(Math.random() * CONFIG.CARD_COLORS.length)],
-            totalSessions: 15 // mặc định 15 buổi (hoặc có thể tuỳ chỉnh)
+            totalSessions: 15
         };
 
         if (id) {
@@ -360,8 +497,7 @@ async function saveClass() {
             await API.updateClass(parseInt(id), payload);
             showAlert('success', 'Đã cập nhật lớp học thành công!');
         } else {
-            const newClass = await API.createClass(payload);
-            // server có thể trả về object mới
+            await API.createClass(payload);
             showAlert('success', 'Đã tạo lớp học mới. Hệ thống đã tạo 15 buổi mặc định.');
         }
 
@@ -402,10 +538,7 @@ async function deleteClass(classId) {
     }
 }
 
-
-
 // ===== POPULATE SELECTS =====
-// Nạp danh sách giáo viên vào select #classTeacher
 async function populateTeachersSelect() {
     try {
         if (!teachers || teachers.length === 0) {
@@ -420,7 +553,6 @@ async function populateTeachersSelect() {
     }
 }
 
-// Nạp danh sách CM (từ CMAPI) vào select #classCM
 async function populateCMSelect() {
     try {
         if (!cms || cms.length === 0) {
@@ -434,6 +566,8 @@ async function populateCMSelect() {
         console.error('populateCMSelect error', err);
     }
 }
+
+// ===== ATTENDANCE CACHE =====
 const attendanceCache = {
     data: {},
     has(classId, sessionNumber) {
@@ -463,7 +597,6 @@ function renderClassStudentsQuick(classId) {
         return;
     }
 
-    // Hiển thị học sinh ngay, thêm "đang tải..." cho stats
     container.innerHTML = classStudents.map(s => `
         <div class="student-item" data-student-id="${s.id}">
             <div class="student-avatar">${getInitials(s.name)}</div>
@@ -480,6 +613,7 @@ function renderClassStudentsQuick(classId) {
         </div>
     `).join('');
 }
+
 async function viewClassDetail(classId) {
     try {
         currentClassId = classId;
@@ -514,6 +648,7 @@ async function viewClassDetail(classId) {
         showAlert('error', 'Không thể mở chi tiết lớp: ' + err.message);
     }
 }
+
 async function loadAttendanceStatsBackground(classId) {
     const classStudents = students.filter(s => s.classId === classId);
     const cls = classes.find(c => c.id === classId);
@@ -526,7 +661,6 @@ async function loadAttendanceStatsBackground(classId) {
     try {
         const totalSessions = cls?.totalSessions || 15;
 
-        // Load attendance cho TẤT CẢ sessions trong 1 lần
         const promises = [];
         for (let session = 1; session <= totalSessions; session++) {
             promises.push(
@@ -536,10 +670,8 @@ async function loadAttendanceStatsBackground(classId) {
             );
         }
 
-        // Đợi tất cả requests hoàn thành
         const results = await Promise.all(promises);
 
-        // Process tất cả records
         results.forEach(({ session, records }) => {
             attendanceCache.set(classId, session, records);
 
@@ -556,7 +688,6 @@ async function loadAttendanceStatsBackground(classId) {
             });
         });
 
-        // Update UI với stats đã load
         updateStudentStatsUI(attendanceStats);
         updateSessionStatsUI(classId);
 
@@ -564,6 +695,7 @@ async function loadAttendanceStatsBackground(classId) {
         console.error('Error loading attendance stats:', error);
     }
 }
+
 function updateStudentStatsUI(attendanceStats) {
     Object.keys(attendanceStats).forEach(studentId => {
         const stats = attendanceStats[studentId];
@@ -580,7 +712,6 @@ function updateStudentStatsUI(attendanceStats) {
     });
 }
 
-// Update UI của session stats
 function updateSessionStatsUI(classId) {
     const sessionCards = document.querySelectorAll('.session-card');
 
@@ -601,17 +732,14 @@ function updateSessionStatsUI(classId) {
 
         if (total === 0) return;
 
-        // Update status text
         const statusP = card.querySelector('p:nth-of-type(2)');
         if (statusP) {
             statusP.textContent = 'Đã điểm danh';
         }
 
-        // Check if stats already exist
         let statsDiv = card.querySelector('.session-stats');
 
         if (!statsDiv) {
-            // Create new stats div
             const placeholder = card.querySelector('.session-stats-placeholder');
             if (placeholder) {
                 placeholder.remove();
@@ -635,7 +763,6 @@ function updateSessionStatsUI(classId) {
             `;
             card.insertAdjacentHTML('beforeend', newStatsHTML);
         } else {
-            // Update existing stats
             statsDiv.innerHTML = `
                 <div class="session-stat">
                     <span>${stats.onTime}</span>
@@ -654,7 +781,6 @@ function updateSessionStatsUI(classId) {
     });
 }
 
-// OPTIMIZED: Render sessions grid với loading skeleton
 async function renderSessionsGridOptimized(classId) {
     const container = document.getElementById('sessionsGrid');
     if (!container) return;
@@ -662,7 +788,6 @@ async function renderSessionsGridOptimized(classId) {
     try {
         showLoading();
 
-        // Load sessions từ API
         let sessions = await API.getSessions(classId);
 
         if (!sessions || sessions.length === 0) {
@@ -677,7 +802,6 @@ async function renderSessionsGridOptimized(classId) {
             return;
         }
 
-        // Parse sessions
         const parsedSessions = sessions.map(s => ({
             id: s.id,
             classId: s.class_id || s.classId,
@@ -687,7 +811,6 @@ async function renderSessionsGridOptimized(classId) {
             note: s.note || ''
         }));
 
-        // ✅ FIX: LOAD ATTENDANCE DATA TRƯỚC KHI RENDER
         const sessionStatsMap = {};
 
         for (const session of parsedSessions) {
@@ -710,7 +833,6 @@ async function renderSessionsGridOptimized(classId) {
             }
         }
 
-        // Render sessions với dữ liệu thực
         let html = '';
         parsedSessions.forEach((session, index) => {
             const stats = sessionStatsMap[session.number];
@@ -755,7 +877,6 @@ async function renderSessionsGridOptimized(classId) {
         container.innerHTML = html;
         hideLoading();
 
-        // Render bảng điểm danh cho buổi đầu tiên
         if (parsedSessions.length > 0) {
             await renderAttendanceTable(parsedSessions[0].number, parsedSessions[0].date);
         }
@@ -773,175 +894,20 @@ async function renderSessionsGridOptimized(classId) {
     }
 }
 
-
-// Render danh sách học sinh trong 1 lớp
-async function renderClassStudents(classId) {
-    const classStudents = students.filter(s => s.classId === classId);
-    const container = document.getElementById('classStudentsList');
-
-    if (classStudents.length === 0) {
-        container.innerHTML = '<p style="text-align:center; color: var(--text-light);">Chưa có học sinh</p>';
-        return;
-    }
-
-    // Load all attendance for this class to calculate stats
-    const cls = classes.find(c => c.id === classId);
-    const attendanceStats = {};
-
-    // Initialize stats for each student
-    classStudents.forEach(s => {
-        attendanceStats[s.id] = {
-            onTime: 0,
-            late: 0,
-            excused: 0,
-            absent: 0
-        };
-    });
-
-    // Load attendance for all sessions BY SESSION NUMBER
-    try {
-        const totalSessions = cls?.totalSessions || 15;
-        for (let session = 1; session <= totalSessions; session++) {
-            const records = await API.getAttendance(classId, session);
-            records.forEach(record => {
-                const studentId = parseInt(record.studentid || record.studentId);
-                if (attendanceStats[studentId]) {
-                    switch (record.status) {
-                        case 'on-time':
-                            attendanceStats[studentId].onTime++;
-                            break;
-                        case 'late':
-                            attendanceStats[studentId].late++;
-                            break;
-                        case 'excused':
-                            attendanceStats[studentId].excused++;
-                            break;
-                        case 'absent':
-                            attendanceStats[studentId].absent++;
-                            break;
-                    }
-                }
-            });
-        }
-    } catch (error) {
-        console.error('Error loading attendance stats:', error);
-    }
-
-    container.innerHTML = classStudents.map(s => {
-        const stats = attendanceStats[s.id] || { onTime: 0, late: 0, excused: 0, absent: 0 };
-        return `
-        <div class="student-item">
-            <div class="student-avatar">${getInitials(s.name)}</div>
-            <div class="student-info">
-                <h4>${s.name}</h4>
-                <p>MSSV: ${s.code} • ${s.email}</p>
-            </div>
-            <div class="student-stats">
-                <div class="student-stat"><strong style="color: #10b981;">${stats.onTime}</strong><span>Đúng giờ</span></div>
-                <div class="student-stat"><strong style="color: #f59e0b;">${stats.late}</strong><span>Muộn</span></div>
-                <div class="student-stat"><strong style="color: #06b6d4;">${stats.excused}</strong><span>Có phép</span></div>
-                <div class="student-stat"><strong style="color: #ef4444;">${stats.absent}</strong><span>Vắng</span></div>
-            </div>
-        </div>
-    `}).join('');
-}
-
-
-// Render sessions grid: lấy sessions từ API hoặc tạo mặc định
-async function renderSessionsGrid(totalSessions) {
-    const container = document.getElementById('sessionsGrid');
-
-    // Load sessions from API
-    let sessions = [];
-    try {
-        sessions = await API.getSessions(currentClassId);
-        console.log('Loaded sessions:', sessions);
-    } catch (error) {
-        console.error('Error loading sessions:', error);
-    }
-
-    if (sessions.length === 0) {
-        // Fallback: generate default sessions
-        const cls = classes.find(c => c.id === currentClassId);
-        if (cls && cls.sessions) {
-            sessions = cls.sessions;
-        }
-    }
-
-    // Load attendance stats for each session BY SESSION NUMBER
-    const sessionStats = {};
-
-    for (let session of sessions) {
-        try {
-            // ĐÂY LÀ ĐIỂM QUAN TRỌNG: Dùng session.number thay vì session.date
-            const records = await API.getAttendance(currentClassId, session.number);
-            sessionStats[session.number] = {
-                onTime: records.filter(r => r.status === 'on-time').length,
-                late: records.filter(r => r.status === 'late').length,
-                excused: records.filter(r => r.status === 'excused').length,
-                absent: records.filter(r => r.status === 'absent').length
-            };
-        } catch (error) {
-            console.error('Error loading stats for session:', session.number, error);
-        }
-    }
-
-    let html = '';
-    sessions.forEach((session, index) => {
-        const stats = sessionStats[session.number] || { onTime: 0, late: 0, excused: 0, absent: 0 };
-        const hasData = stats.onTime + stats.late + stats.excused + stats.absent > 0;
-        const isPast = new Date(session.date) < new Date();
-
-        html += `
-            <div class="session-card ${index === 0 ? 'active' : ''}" onclick="selectSession(${session.number}, '${session.date}')">
-                <h4>Buổi ${session.number}</h4>
-                <p style="font-size: 12px;">${formatDate(session.date)}</p>
-                <p style="font-size: 11px; opacity: 0.8;">${hasData ? 'Đã điểm danh' : isPast ? 'Chưa điểm danh' : 'Sắp tới'}</p>
-                ${hasData ? `
-                    <div class="session-stats">
-                        <div class="session-stat">
-                            <span>${stats.onTime}</span>
-                            <span>✓</span>
-                        </div>
-                        <div class="session-stat">
-                            <span>${stats.late}</span>
-                            <span>⏰</span>
-                        </div>
-                        <div class="session-stat">
-                            <span>${stats.absent}</span>
-                            <span>✗</span>
-                        </div>
-                    </div>
-                ` : ''}
-            </div>
-        `;
-    });
-
-    container.innerHTML = html;
-
-    // Render first session
-    if (sessions.length > 0) {
-        await renderAttendanceTable(sessions[0].number, sessions[0].date);
-    }
-}
 let currentSession = null;
 
 async function selectSession(sessionNumber, sessionDate) {
     currentSession = sessionNumber;
     currentSessionDate = sessionDate;
 
-    // Update active state
     document.querySelectorAll('.session-card').forEach(card => {
         card.classList.remove('active');
     });
     event.currentTarget.classList.add('active');
 
-    // Render attendance table
     await renderAttendanceTable(sessionNumber, sessionDate);
 }
 
-
-// OPTIMIZED: Render bảng điểm danh - dùng cache
 async function renderAttendanceTable(sessionNumber, sessionDate) {
     const classStudents = students.filter(s =>
         (s.classId || s.class_id) === currentClassId
@@ -955,17 +921,14 @@ async function renderAttendanceTable(sessionNumber, sessionDate) {
     try {
         showLoading();
 
-        // Kiểm tra cache trước
         let attendanceRecords = [];
         if (attendanceCache.has(currentClassId, sessionNumber)) {
             attendanceRecords = attendanceCache.get(currentClassId, sessionNumber);
         } else {
-            // Load từ API
             attendanceRecords = await API.getAttendance(currentClassId, sessionNumber);
             attendanceCache.set(currentClassId, sessionNumber, attendanceRecords);
         }
 
-        // Parse attendance records
         const attendanceMap = {};
         attendanceRecords.forEach(record => {
             const studentId = record.student_id || record.studentId || record.studentid;
@@ -975,8 +938,7 @@ async function renderAttendanceTable(sessionNumber, sessionDate) {
             };
         });
 
-        // Check permission
-        const canEdit = currentUser?.role === 'teacher' || currentUser?.role === 'admin';
+        const canEdit = hasPermission('', 'attendance', 'edit');
 
         container.innerHTML = `
             <div style="padding: 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
@@ -1053,7 +1015,13 @@ async function renderAttendanceTable(sessionNumber, sessionDate) {
     }
 }
 
-// OPTIMIZED: Save attendance và update cache
+function setAttendance(btn) {
+    const tr = btn.closest('tr');
+    if (!tr) return;
+    tr.querySelectorAll('.status-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+}
+
 async function saveAttendance() {
     try {
         if (!currentSession) {
@@ -1086,7 +1054,6 @@ async function saveAttendance() {
         showLoading();
         await API.saveAttendance(currentClassId, currentSession, records);
 
-        // Update cache
         attendanceCache.set(currentClassId, currentSession, records.map(r => ({
             studentid: r.studentId,
             student_id: r.studentId,
@@ -1097,7 +1064,6 @@ async function saveAttendance() {
         hideLoading();
         showAlert('success', `Đã lưu điểm danh buổi ${currentSession} thành công!`);
 
-        // Update session card UI
         updateSessionStatsUI(currentClassId);
 
     } catch (error) {
@@ -1106,48 +1072,6 @@ async function saveAttendance() {
         showAlert('error', 'Không thể lưu điểm danh: ' + error.message);
     }
 }
-
-// ===== UPDATE SESSION STATS UI =====
-function updateSessionStatsUI(classId) {
-    const sessionCards = document.querySelectorAll('.session-card');
-
-    sessionCards.forEach(card => {
-        const sessionNumber = parseInt(card.dataset.sessionNumber);
-        const records = attendanceCache.get(classId, sessionNumber);
-
-        const stats = {
-            onTime: records.filter(r => r.status === 'on-time').length,
-            late: records.filter(r => r.status === 'late').length,
-            excused: records.filter(r => r.status === 'excused').length,
-            absent: records.filter(r => r.status === 'absent').length
-        };
-
-        const hasData = stats.onTime + stats.late + stats.excused + stats.absent > 0;
-
-        if (hasData) {
-            const statsDiv = card.querySelector('.session-stats-placeholder');
-            if (statsDiv) {
-                statsDiv.outerHTML = `
-                    <div class="session-stats">
-                        <div class="session-stat"><span>${stats.onTime}</span><span>✓</span></div>
-                        <div class="session-stat"><span>${stats.late}</span><span>⏰</span></div>
-                        <div class="session-stat"><span>${stats.absent}</span><span>✗</span></div>
-                    </div>
-                `;
-            }
-        }
-    });
-}
-
-// Thay đổi UI của status button trong 1 hàng
-function setAttendance(btn) {
-    const tr = btn.closest('tr');
-    if (!tr) return;
-    tr.querySelectorAll('.status-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-}
-
-// Lưu điểm danh cho currentClassId + currentSessionDate
 
 // ===== STUDENTS CRUD =====
 async function loadStudents() {
@@ -1167,6 +1091,12 @@ async function loadStudents() {
         console.error('loadStudents error:', err);
         showAlert('error', 'Không thể tải danh sách học sinh: ' + err.message);
     }
+}
+
+async function showStudents() {
+    showContent('studentsContent');
+    setSidebarActive(2);
+    await loadStudents();
 }
 
 function renderStudentsTable() {
@@ -1191,13 +1121,16 @@ function renderStudentsTable() {
             <td>${s.phone || ''}</td>
             <td>${s.className || ''}</td>
             <td>
-                <button class="action-btn edit" onclick="window.editStudent(${s.id})" title="Chỉnh sửa"><i class="fas fa-edit"></i></button>
-                <button class="action-btn delete" onclick="window.deleteStudent(${s.id})" title="Xóa"><i class="fas fa-trash"></i></button>
+                ${hasPermission('', 'students', 'edit') ? `
+                    <button class="action-btn edit" onclick="window.editStudent(${s.id})" title="Chỉnh sửa"><i class="fas fa-edit"></i></button>
+                ` : ''}
+                ${hasPermission('', 'students', 'delete') ? `
+                    <button class="action-btn delete" onclick="window.deleteStudent(${s.id})" title="Xóa"><i class="fas fa-trash"></i></button>
+                ` : ''}
             </td>
         </tr>
     `).join('');
 }
-
 
 async function openAddStudentModal() {
     document.getElementById('studentModalTitle').innerHTML = '<i class="fas fa-user-plus"></i> Thêm học sinh';
@@ -1296,8 +1229,6 @@ async function saveStudent() {
     }
 }
 
-
-// Populate class select for student modal
 async function populateClassesSelect() {
     try {
         if (!classes || classes.length === 0) classes = await API.getClasses();
@@ -1310,8 +1241,7 @@ async function populateClassesSelect() {
     }
 }
 
-// ===== TEACHERS CRUD (giữ cơ bản) =====
-
+// ===== TEACHERS CRUD =====
 async function loadTeachers() {
     try {
         showLoading();
@@ -1324,6 +1254,12 @@ async function loadTeachers() {
         console.error('loadTeachers error:', err);
         showAlert('error', 'Không thể tải danh sách giáo viên: ' + err.message);
     }
+}
+
+async function showTeachers() {
+    showContent('teachersContent');
+    setSidebarActive(3);
+    await loadTeachers();
 }
 
 function renderTeachersTable() {
@@ -1349,37 +1285,16 @@ function renderTeachersTable() {
             <td>${t.subject || ''}</td>
             <td><span class="status ${t.active ? 'status-active' : 'status-pending'}">${t.active ? 'Hoạt động' : 'Tạm dừng'}</span></td>
             <td>
-                <button class="action-btn edit" onclick="window.editTeacher(${t.id})" title="Chỉnh sửa"><i class="fas fa-edit"></i></button>
-                <button class="action-btn delete" onclick="window.deleteTeacher(${t.id})" title="Xóa"><i class="fas fa-trash"></i></button>
+                ${hasPermission('', 'teachers', 'edit') ? `
+                    <button class="action-btn edit" onclick="window.editTeacher(${t.id})" title="Chỉnh sửa"><i class="fas fa-edit"></i></button>
+                ` : ''}
+                ${hasPermission('', 'teachers', 'delete') ? `
+                    <button class="action-btn delete" onclick="window.deleteTeacher(${t.id})" title="Xóa"><i class="fas fa-trash"></i></button>
+                ` : ''}
             </td>
         </tr>
     `).join('');
 }
-
-async function editTeacher(teacherId) {
-    try {
-        const t = teachers.find(x => x.id === teacherId);
-        if (!t) {
-            showAlert('error', 'Không tìm thấy giáo viên');
-            return;
-        }
-
-        document.getElementById('teacherModalTitle').innerHTML = '<i class="fas fa-edit"></i> Chỉnh sửa giáo viên';
-        document.getElementById('teacherId').value = t.id;
-        document.getElementById('teacherCode').value = t.code || '';
-        document.getElementById('teacherName').value = t.name || '';
-        document.getElementById('teacherEmail').value = t.email || '';
-        document.getElementById('teacherPhone').value = t.phone || '';
-        document.getElementById('teacherSubject').value = t.subject || '';
-
-        openModal('teacherModal');
-    } catch (err) {
-        console.error('editTeacher error:', err);
-        showAlert('error', 'Không thể chỉnh sửa giáo viên: ' + err.message);
-    }
-}
-
-
 
 function openAddTeacherModal() {
     document.getElementById('teacherModalTitle').innerHTML = '<i class="fas fa-chalkboard-teacher"></i> Thêm giáo viên';
@@ -1461,9 +1376,10 @@ async function deleteTeacher(teacherId) {
     }
 }
 
-// ===== CM (Class Manager) CRUD =====
+// ===== CM CRUD =====
 async function showCMs() {
     showContent('cmsContent');
+    setSidebarActive(4);
     await loadCMs();
 }
 
@@ -1515,15 +1431,16 @@ function renderCMsTable() {
             <td><span class="status ${cm.active ? 'status-active' : 'status-pending'}">${cm.active ? 'Hoạt động' : 'Tạm dừng'}</span></td>
             <td>
                 <button class="action-btn view" onclick="window.viewCMDetail(${cm.id})" title="Xem chi tiết"><i class="fas fa-eye"></i></button>
-                ${currentUser?.role === 'admin' ? `
+                ${hasPermission('', 'cms', 'edit') ? `
                     <button class="action-btn edit" onclick="window.editCM(${cm.id})" title="Chỉnh sửa"><i class="fas fa-edit"></i></button>
+                ` : ''}
+                ${hasPermission('', 'cms', 'delete') ? `
                     <button class="action-btn delete" onclick="window.deleteCM(${cm.id})" title="Xóa"><i class="fas fa-trash"></i></button>
                 ` : ''}
             </td>
         </tr>
     `).join('');
 }
-
 
 async function openAddCMModal() {
     document.getElementById('cmModalTitle').innerHTML = '<i class="fas fa-user-shield"></i> Thêm Class Manager';
@@ -1534,6 +1451,7 @@ async function openAddCMModal() {
     document.getElementById('cmPhone').value = '';
     openModal('cmModal');
 }
+
 async function editCM(cmId) {
     try {
         const cm = cms.find(c => c.id === cmId);
@@ -1590,6 +1508,7 @@ async function deleteCM(cmId) {
         showAlert('error', 'Không thể xóa CM: ' + err.message);
     }
 }
+
 async function saveCM() {
     try {
         const id = document.getElementById('cmId').value;
@@ -1615,648 +1534,11 @@ async function saveCM() {
     }
 }
 
-// ===== UTILITIES / HELPERS =====
-function openModal(modalId) {
-    const m = document.getElementById(modalId);
-    if (!m) return;
-    m.classList.add('active');
-    document.body.style.overflow = 'hidden';
-}
-
-function closeModal(modalId) {
-    const m = document.getElementById(modalId);
-    if (!m) return;
-    m.classList.remove('active');
-    document.body.style.overflow = 'auto';
-}
-
-function switchTab(event, tabId) {
-    const tabs = event.target.closest('.tabs');
-    if (!tabs) return;
-    tabs.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    event.target.classList.add('active');
-    const modalBody = event.target.closest('.modal-body');
-    modalBody.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    document.getElementById(tabId).classList.add('active');
-}
-
-window.onclick = function (event) {
-    if (event.target.classList && event.target.classList.contains('modal')) {
-        event.target.classList.remove('active');
-        document.body.style.overflow = 'auto';
-    }
-}
-
-function showAlert(type, message) {
-    const alertDiv = document.createElement('div');
-    alertDiv.className = `alert alert-${type}`;
-    alertDiv.innerHTML = `<i class="fas fa-${type === 'success' ? 'check-circle' : type === 'info' ? 'info-circle' : 'exclamation-circle'}"></i> <span>${message}</span>`;
-
-    const container = document.querySelector('.main-content') || document.body;
-    container.insertBefore(alertDiv, container.firstChild);
-
-    setTimeout(() => alertDiv.remove(), 5000);
-}
-
-function showLoading() {
-    const l = document.getElementById('loadingOverlay');
-    if (l) l.classList.add('active');
-}
-
-function hideLoading() {
-    const l = document.getElementById('loadingOverlay');
-    if (l) l.classList.remove('active');
-}
-// Format date sang 'dd/mm/yyyy' (vi-VN)
-function formatDate(dateStr) {
-    if (!dateStr) return '';
-    try {
-        const d = new Date(dateStr);
-        return d.toLocaleDateString('vi-VN');
-    } catch (e) {
-        return dateStr;
-    }
-}
-// Lấy 2 ký tự đầu tên
-function getInitials(name) {
-    if (!name) return '';
-    return name.split(' ').slice(-2).map(n => n[0]).join('').toUpperCase();
-}
-
-function getWeekdayName(day) {
-    const days = ['Chủ nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
-    return typeof day === 'number' ? days[day] : (days[parseInt(day)] || '');
-}
-
-// Tạo default sessions (nếu API không trả)
-// startDate: 'YYYY-MM-DD' or ISO, weekday: 0..6, total: số buổi
-function generateDefaultSessions(startDate, weekDay, total = 15) {
-    const sessions = [];
-    if (!startDate) {
-        // nếu không có startDate, gen ngày hôm nay + mỗi tuần 7 ngày
-        let base = new Date();
-        for (let i = 0; i < total; i++) {
-            const d = new Date(base);
-            d.setDate(base.getDate() + i * 7);
-            sessions.push({ number: i + 1, date: d.toISOString().slice(0, 10) });
-        }
-        return sessions;
-    }
-    const start = new Date(startDate);
-    // tìm ngày đầu tiên >= start có weekday = weekDay
-    const target = parseInt(weekDay);
-    let first = new Date(start);
-    // Nếu weekDay hợp lệ 0..6, tìm offset
-    if (!isNaN(target) && target >= 0 && target <= 6) {
-        while (first.getDay() !== target) first.setDate(first.getDate() + 1);
-    }
-    for (let i = 0; i < total; i++) {
-        const d = new Date(first);
-        d.setDate(first.getDate() + i * 7);
-        sessions.push({ number: i + 1, date: d.toISOString().slice(0, 10) });
-    }
-    return sessions;
-}
-
-// preview sessions (hiển thị số buổi dự đoán)
-function previewSessions() {
-    const startDate = document.getElementById('classStartDate').value;
-    const weekDay = document.getElementById('classWeekDay').value;
-    const total = 15;
-    const preview = document.getElementById('sessionsPreview');
-    if (!preview) return;
-    if (!startDate || weekDay === '') {
-        preview.style.display = 'none';
-        return;
-    }
-    const sessions = generateDefaultSessions(startDate, parseInt(weekDay), total);
-    preview.style.display = 'block';
-    preview.innerHTML = `<strong>15 buổi (ví dụ) — Bắt đầu: ${formatDate(startDate)} — Buổi 1: ${formatDate(sessions[0].date)}</strong>`;
-}
-
-// ===== MISC =====
-// Nếu bạn muốn export CM -> dùng XLSX (nếu đã include thư viện)
-async function exportCMs() {
-    try {
-        showLoading();
-        const wb = XLSX.utils.book_new();
-        const data = cms.map(cm => ({
-            'Mã CM': cm.code, 'Họ & tên': cm.name, 'Email': cm.email, 'SĐT': cm.phone,
-            'Số lớp': classes.filter(c => c.cmId === cm.id).length, 'Trạng thái': cm.active ? 'Hoạt động' : 'Tạm dừng'
-        }));
-        const ws = XLSX.utils.json_to_sheet(data);
-        XLSX.utils.book_append_sheet(wb, ws, 'CMs');
-        const ts = new Date().toISOString().slice(0, 10);
-        XLSX.writeFile(wb, `Danh_sach_CM_${ts}.xlsx`);
-        hideLoading();
-        showAlert('success', 'Export thành công');
-    } catch (err) {
-        hideLoading();
-        console.error('exportCMs error', err);
-        showAlert('error', 'Không thể export');
-    }
-}
-function quickLogin(role) {
-    const user = CONFIG.DEMO_USERS[role];
-    if (!user) return;
-    document.getElementById('loginEmail').value = user.email;
-    document.getElementById('loginPassword').value = user.password;
-    login();
-}
-// ===== CẬP NHẬT LOGIN - REDIRECT SAU KHI LOGIN =====
-
-async function showDashboard() {
-    showContent('dashboardContent');
-    setSidebarActive(0);
-    await loadDashboard();
-}
-
-// ===== CLASSES =====
-async function showClasses() {
-    showContent('classesContent');
-    setSidebarActive(1);
-    await loadClasses();
-}
-
-
-async function showStudents() {
-    showContent('studentsContent');
-    setSidebarActive(2);
-    await loadStudents();
-}
-
-async function showTeachers() {
-    showContent('teachersContent');
-    setSidebarActive(3); // Teachers là item thứ 4
-    await loadTeachers();
-}
-
-async function showCMs() {
-    showContent('cmsContent');
-    setSidebarActive(4); // CMs là item thứ 5
-    await loadCMs();
-}
-
-// Helper: Set active class cho sidebar menu item
-
-// Update showContent để không xóa active của sidebar
-function showContent(contentId) {
-    // Hide all content sections
-    document.querySelectorAll('.content-section').forEach(s => s.classList.remove('active'));
-
-    // Show selected content
-    const el = document.getElementById(contentId);
-    if (el) el.classList.add('active');
-
-    // Note: không xóa active của sidebar ở đây nữa
-    // để setSidebarActive() xử lý riêng
-}
-
-const PERMISSIONS = {
-    admin: {
-        classes: { view: true, create: true, edit: true, delete: true },
-        students: { view: true, create: true, edit: true, delete: true },
-        teachers: { view: true, create: true, edit: true, delete: true },
-        cms: { view: true, create: true, edit: true, delete: true },
-        attendance: { view: true, edit: true },
-        comments: { view: true, edit: true },
-        export: true
-    },
-    teacher: {
-        classes: { view: true, create: false, edit: false, delete: false },
-        students: { view: true, create: false, edit: false, delete: false },
-        teachers: { view: false, create: false, edit: false, delete: false },
-        cms: { view: false, create: false, edit: false, delete: false },
-        attendance: { view: true, edit: true }, // Chỉ teacher mới được điểm danh
-        comments: { view: true, edit: true }, // Chỉ teacher mới được nhận xét
-        export: true
-    },
-    cm: {
-        classes: { view: true, create: true, edit: true, delete: true }, // CM quản lý lớp
-        students: { view: true, create: true, edit: true, delete: true }, // CM quản lý học sinh
-        teachers: { view: true, create: false, edit: false, delete: false },
-        cms: { view: true, create: false, edit: false, delete: false },
-        attendance: { view: true, edit: false }, // CM chỉ xem, không sửa
-        comments: { view: true, edit: false }, // CM chỉ xem, không sửa
-        export: true
-    }
-};
-
-// Check permission helper
-function hasPermission(action, resource, operation = 'view') {
-    if (!currentUser) return false;
-
-    const userPermissions = PERMISSIONS[currentUser.role];
-    if (!userPermissions) return false;
-
-    if (action === 'export') {
-        return userPermissions.export === true;
-    }
-
-    return userPermissions[resource] && userPermissions[resource][operation] === true;
-}
-
-// ===== LOGIN SYSTEM =====
-
-// ===== REGISTER SYSTEM =====
-function showRegisterForm() {
-    document.getElementById('loginForm').style.display = 'none';
-    document.getElementById('registerForm').style.display = 'block';
-    document.getElementById('loginTitle').textContent = 'Đăng ký tài khoản';
-}
-
-function showLoginForm() {
-    document.getElementById('registerForm').style.display = 'none';
-    document.getElementById('loginForm').style.display = 'block';
-    document.getElementById('loginTitle').textContent = 'Đăng nhập';
-}
-
-async function register() {
-    const name = document.getElementById('registerName').value.trim();
-    const email = document.getElementById('registerEmail').value.trim();
-    const password = document.getElementById('registerPassword').value;
-    const confirmPassword = document.getElementById('registerConfirmPassword').value;
-    const role = document.getElementById('registerRole').value;
-
-    // Validation
-    if (!name || !email || !password || !confirmPassword) {
-        showLoginAlert('error', 'Vui lòng nhập đầy đủ thông tin');
-        return;
-    }
-
-    if (!isValidEmail(email)) {
-        showLoginAlert('error', 'Email không hợp lệ');
-        return;
-    }
-
-    if (password.length < 6) {
-        showLoginAlert('error', 'Mật khẩu phải có ít nhất 6 ký tự');
-        return;
-    }
-
-    if (password !== confirmPassword) {
-        showLoginAlert('error', 'Mật khẩu xác nhận không khớp');
-        return;
-    }
-
-    if (!role || role === '') {
-        showLoginAlert('error', 'Vui lòng chọn vai trò');
-        return;
-    }
-
-    try {
-        showLoading();
-
-        // Call API to create user
-        const result = await API.register({
-            name,
-            email,
-            password,
-            role
-        });
-
-        if (result.success) {
-            hideLoading();
-            showLoginAlert('success', 'Đăng ký thành công! Vui lòng đăng nhập.');
-
-            // Switch back to login form
-            setTimeout(() => {
-                showLoginForm();
-                document.getElementById('loginEmail').value = email;
-                document.getElementById('loginPassword').value = password;
-            }, 2000);
-        } else {
-            hideLoading();
-            showLoginAlert('error', result.message || 'Email đã tồn tại hoặc có lỗi xảy ra');
-        }
-    } catch (error) {
-        hideLoading();
-        console.error('Register error:', error);
-        showLoginAlert('error', 'Có lỗi xảy ra khi đăng ký. Vui lòng thử lại.');
-    }
-}
-
-// ===== LINK TEACHER/CM AFTER REGISTER =====
-async function loadTeacherCMOptions() {
-    const role = document.getElementById('registerRole').value;
-    const linkSection = document.getElementById('linkAccountSection');
-    const linkSelect = document.getElementById('linkAccountSelect');
-
-    linkSection.style.display = 'none';
-    linkSelect.innerHTML = '<option value="">Chọn...</option>';
-
-    if (role === 'teacher') {
-        try {
-            const teachers = await API.getTeachers();
-            const unlinkedTeachers = teachers.filter(t => !t.userId);
-
-            if (unlinkedTeachers.length > 0) {
-                linkSection.style.display = 'block';
-                document.getElementById('linkAccountLabel').textContent = 'Liên kết với hồ sơ giáo viên:';
-
-                unlinkedTeachers.forEach(t => {
-                    linkSelect.innerHTML += `<option value="${t.id}">${t.code} - ${t.name}</option>`;
-                });
-            }
-        } catch (error) {
-            console.error('Error loading teachers:', error);
-        }
-    } else if (role === 'cm') {
-        try {
-            const cms = await CMAPI.getAll();
-            const unlinkedCMs = cms.filter(cm => !cm.userId);
-
-            if (unlinkedCMs.length > 0) {
-                linkSection.style.display = 'block';
-                document.getElementById('linkAccountLabel').textContent = 'Liên kết với hồ sơ CM:';
-
-                unlinkedCMs.forEach(cm => {
-                    linkSelect.innerHTML += `<option value="${cm.id}">${cm.code} - ${cm.name}</option>`;
-                });
-            }
-        } catch (error) {
-            console.error('Error loading CMs:', error);
-        }
-    }
-}
-
-// ===== UPDATE UI BASED ON PERMISSIONS =====
-function updateUserUI() {
-    if (!currentUser) return;
-
-    const nameEl = document.getElementById('userName');
-    const avatarEl = document.getElementById('userAvatar');
-    const roleEl = document.getElementById('userRole');
-
-    if (nameEl) nameEl.textContent = currentUser.name || '';
-    if (avatarEl) avatarEl.textContent = (currentUser.avatar || currentUser.name || '').slice(0, 1).toUpperCase();
-    if (roleEl) {
-        roleEl.className = `badge badge-${currentUser.role || 'default'}`;
-        const roleText = {
-            'admin': 'Admin',
-            'teacher': 'Giáo viên',
-            'cm': 'Class Manager'
-        };
-        roleEl.textContent = roleText[currentUser.role] || currentUser.role;
-    }
-
-    // ===== FIX: UPDATE SIDEBAR MENU =====
-    updateSidebarMenu();
-}
-function updateSidebarMenu() {
-    const sidebar = document.querySelector('.sidebar-menu');
-    if (!sidebar) return;
-
-    // Base menu structure
-    let menuHTML = '';
-
-    // Dashboard - always visible
-    menuHTML += '<li><a onclick="showDashboard()"><i class="fas fa-th-large"></i> Dashboard</a></li>';
-
-    // Classes - visible to all roles
-    menuHTML += '<li><a onclick="showClasses()"><i class="fas fa-chalkboard"></i> Lớp học</a></li>';
-
-    // Students - visible to all roles
-    menuHTML += '<li><a onclick="showStudents()"><i class="fas fa-user-graduate"></i> Học sinh</a></li>';
-
-    // Teachers - visible to admin and cm
-    if (currentUser.role === 'admin' || currentUser.role === 'cm') {
-        menuHTML += '<li><a onclick="showTeachers()"><i class="fas fa-chalkboard-teacher"></i> Giáo viên</a></li>';
-    }
-
-    // CMs - only admin
-    if (currentUser.role === 'admin') {
-        menuHTML += '<li><a onclick="showCMs()"><i class="fas fa-user-shield"></i> Class Manager</a></li>';
-    }
-
-    sidebar.innerHTML = menuHTML;
-
-    // Set active state for dashboard
-    const firstLink = sidebar.querySelector('li a');
-    if (firstLink) firstLink.classList.add('active');
-}
-
-
-// ===== RENDER FUNCTIONS WITH PERMISSIONS =====
-
-// Update renderClassCards to hide action buttons based on permissions
-function renderClassCards(classList, containerId) {
-    const container = document.getElementById(containerId);
-
-    if (!container) {
-        console.error('Container not found:', containerId);
-        return;
-    }
-
-    if (!classList || classList.length === 0) {
-        container.innerHTML = `
-      <div style="grid-column: 1/-1; text-align: center; padding: 60px 20px; color: var(--text-light);">
-        <i class="fas fa-inbox" style="font-size: 64px; margin-bottom: 16px; opacity: 0.5;"></i>
-        <h3 style="font-size: 20px; margin-bottom: 8px;">Không có lớp học</h3>
-        <p>Chưa có lớp học nào. ${hasPermission('', 'classes', 'create') ? 'Nhấn "Thêm lớp" để tạo mới.' : ''}</p>
-      </div>
-    `;
-        return;
-    }
-
-    const html = classList.map(cls => {
-        const weekdayName = getWeekdayName(cls.weekDay);
-
-        return `
-      <div class="class-card" onclick="viewClassDetail(${cls.id})">
-        <div class="card-header ${cls.color || 'green'}">
-          <h3>${cls.name || 'Chưa có tên'}</h3>
-          <div class="class-code">Mã: ${cls.code || 'N/A'}</div>
-        </div>
-        <div class="card-body">
-          <div class="card-info">
-            <div class="card-info-item">
-              <i class="fas fa-user-tie"></i>
-              <span>GV: ${cls.teacher || 'Chưa có'}</span>
-            </div>
-            <div class="card-info-item">
-              <i class="fas fa-user-shield"></i>
-              <span>CM: ${cls.cm || 'Chưa có'}</span>
-            </div>
-            <div class="card-info-item">
-              <i class="fas fa-users"></i>
-              <span>${cls.students || 0} học sinh</span>
-            </div>
-            <div class="card-info-item">
-              <i class="fas fa-calendar"></i>
-              <span>Bắt đầu: ${formatDate(cls.startDate)}</span>
-            </div>
-            <div class="card-info-item">
-              <i class="fas fa-clock"></i>
-              <span>${weekdayName}: ${cls.timeSlot || 'Chưa có'}</span>
-            </div>
-            <div class="card-info-item">
-              <i class="fas fa-list"></i>
-              <span>${cls.totalSessions || 15} buổi học</span>
-            </div>
-          </div>
-          <div class="card-footer">
-            <button class="btn btn-primary" style="flex:1" onclick="event.stopPropagation(); viewClassDetail(${cls.id})">
-              <i class="fas fa-eye"></i> Chi tiết
-            </button>
-            ${hasPermission('', 'classes', 'edit') ? `
-              <button class="action-btn edit" onclick="event.stopPropagation(); editClass(${cls.id})">
-                <i class="fas fa-edit"></i>
-              </button>
-            ` : ''}
-            ${hasPermission('', 'classes', 'delete') ? `
-              <button class="action-btn delete" onclick="event.stopPropagation(); deleteClass(${cls.id})">
-                <i class="fas fa-trash"></i>
-              </button>
-            ` : ''}
-          </div>
-        </div>
-      </div>
-    `;
-    }).join('');
-
-    container.innerHTML = html;
-}
-
-// Update page headers to show/hide action buttons
-function updatePageHeader(pageType) {
-    const canCreate = hasPermission('', pageType, 'create');
-    const canExport = hasPermission('export');
-
-    return {
-        showCreateButton: canCreate,
-        showExportButton: canExport
-    };
-}
-
-// Update loadClasses to show/hide buttons
-
-
-// Update renderAttendanceTable to disable editing for CM
-async function renderAttendanceTable(sessionNumber, sessionDate) {
-    const classStudents = students.filter(s => s.classId === currentClassId);
-    const container = document.getElementById('attendanceTableContainer');
-
-    currentSession = sessionNumber;
-    currentSessionDate = sessionDate;
-
-    let attendanceRecords = [];
-    try {
-        attendanceRecords = await API.getAttendance(currentClassId, sessionNumber);
-    } catch (error) {
-        console.error('Error loading attendance:', error);
-    }
-
-    const attendanceMap = {};
-    attendanceRecords.forEach(record => {
-        attendanceMap[record.studentid || record.studentId] = {
-            status: record.status,
-            note: record.note
-        };
-    });
-
-    const canEdit = hasPermission('', 'attendance', 'edit');
-
-    container.innerHTML = `
-    <div style="padding: 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
-      <h3>Điểm danh Buổi ${sessionNumber} - ${formatDate(sessionDate)}</h3>
-      ${canEdit ? `
-        <button class="btn btn-primary" onclick="saveAttendance()">
-          <i class="fas fa-save"></i> Lưu điểm danh
-        </button>
-      ` : '<span class="badge badge-info">Chỉ xem</span>'}
-    </div>
-    <table>
-      <thead>
-        <tr>
-          <th>STT</th>
-          <th>Họ tên</th>
-          <th>MSSV</th>
-          <th>Trạng thái</th>
-          <th>Ghi chú</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${classStudents.map((s, i) => {
-        const attendance = attendanceMap[s.id] || { status: 'on-time', note: '' };
-        return `
-            <tr>
-              <td>${i + 1}</td>
-              <td>${s.name}</td>
-              <td>${s.code}</td>
-              <td>
-                <div class="attendance-status">
-                  <button class="status-btn on-time ${attendance.status === 'on-time' ? 'active' : ''}" 
-                    onclick="setAttendance(this)" ${!canEdit ? 'disabled' : ''}>
-                    <i class="fas fa-check"></i> Đúng giờ
-                  </button>
-                  <button class="status-btn late ${attendance.status === 'late' ? 'active' : ''}" 
-                    onclick="setAttendance(this)" ${!canEdit ? 'disabled' : ''}>
-                    <i class="fas fa-clock"></i> Muộn
-                  </button>
-                  <button class="status-btn excused ${attendance.status === 'excused' ? 'active' : ''}" 
-                    onclick="setAttendance(this)" ${!canEdit ? 'disabled' : ''}>
-                    <i class="fas fa-file-alt"></i> Có phép
-                  </button>
-                  <button class="status-btn absent ${attendance.status === 'absent' ? 'active' : ''}" 
-                    onclick="setAttendance(this)" ${!canEdit ? 'disabled' : ''}>
-                    <i class="fas fa-times"></i> Vắng
-                  </button>
-                </div>
-              </td>
-              <td><input type="text" class="note-input" placeholder="Ghi chú..." 
-                value="${attendance.note || ''}" data-student-id="${s.id}" 
-                ${!canEdit ? 'readonly' : ''}></td>
-            </tr>
-          `;
-    }).join('')}
-      </tbody>
-    </table>
-  `;
-}
-
-// Update renderCommentsTab to disable editing for CM
-async function renderCommentsTab(classId) {
-    const classStudents = students.filter(s => s.classId === classId);
-    const container = document.getElementById('commentsStudentsList');
-
-    let existingComments = {};
-    try {
-        existingComments = await API.getComments(classId);
-    } catch (error) {
-        console.error('Error loading comments:', error);
-    }
-
-    const canEdit = hasPermission('', 'comments', 'edit');
-
-    container.innerHTML = classStudents.map(s => `
-    <div class="student-item" style="flex-direction: column; align-items: flex-start;">
-      <div style="display: flex; align-items: center; gap: 16px; width: 100%; margin-bottom: 16px;">
-        <div class="student-avatar">${getInitials(s.name)}</div>
-        <div class="student-info">
-          <h4>${s.name}</h4>
-          <p>MSSV: ${s.code}</p>
-        </div>
-      </div>
-      <textarea class="note-input" rows="3" placeholder="Nhận xét về học sinh..." 
-        data-student-id="${s.id}" ${!canEdit ? 'readonly' : ''}>${existingComments[s.id] || ''}</textarea>
-    </div>
-  `).join('');
-
-    // Update save button
-    const saveBtn = document.querySelector('#commentsTab button');
-    if (saveBtn) {
-        saveBtn.style.display = canEdit ? 'inline-flex' : 'none';
-    }
-}
-// ===== VIEW CM DETAIL =====
-
 async function viewCMDetail(cmId) {
     try {
         showLoading();
-        currentClassId = null; // Reset current class
+        currentClassId = null;
 
-        // Fetch CM details
         const cm = await API.getCM(cmId);
         if (!cm) {
             hideLoading();
@@ -2264,13 +1546,11 @@ async function viewCMDetail(cmId) {
             return;
         }
 
-        // Fetch classes managed by this CM
         const allClasses = await API.getClasses();
         const cmClasses = allClasses.filter(c =>
             (c.cmId || c.cm_id) === parseInt(cmId)
         );
 
-        // Render CM Header
         document.getElementById('cmDetailHeader').innerHTML = `
             <h3>${cm.name}</h3>
             <p style="opacity:0.9;margin-bottom:8px">Mã CM: ${cm.code || 'N/A'}</p>
@@ -2294,10 +1574,7 @@ async function viewCMDetail(cmId) {
             </div>
         `;
 
-        // Render classes list
         renderCMClasses(cmClasses);
-
-        // Calculate and render attendance statistics
         await renderCMAttendanceStats(cmId, cmClasses);
 
         hideLoading();
@@ -2309,7 +1586,6 @@ async function viewCMDetail(cmId) {
     }
 }
 
-// Render danh sách lớp của CM
 function renderCMClasses(cmClasses) {
     const container = document.getElementById('cmClassesList');
     if (!container) return;
@@ -2372,7 +1648,6 @@ function renderCMClasses(cmClasses) {
     container.innerHTML = html;
 }
 
-// Render thống kê điểm danh tổng hợp
 async function renderCMAttendanceStats(cmId, cmClasses) {
     const container = document.getElementById('cmAttendanceStats');
     if (!container) return;
@@ -2388,7 +1663,6 @@ async function renderCMAttendanceStats(cmId, cmClasses) {
     }
 
     try {
-        // Show loading state
         container.innerHTML = `
             <div style="text-align: center; padding: 40px;">
                 <div class="spinner" style="width: 40px; height: 40px; margin: 0 auto;"></div>
@@ -2396,7 +1670,6 @@ async function renderCMAttendanceStats(cmId, cmClasses) {
             </div>
         `;
 
-        // Calculate total statistics
         let totalStats = {
             totalClasses: cmClasses.length,
             totalStudents: 0,
@@ -2411,18 +1684,15 @@ async function renderCMAttendanceStats(cmId, cmClasses) {
 
         const classStats = [];
 
-        // Loop through each class and gather stats
         for (const cls of cmClasses) {
             const classId = cls.id;
 
-            // Count students
             const students = await API.getStudents();
             const classStudents = students.filter(s =>
                 (s.classId || s.class_id) === classId
             );
             totalStats.totalStudents += classStudents.length;
 
-            // Get sessions
             const sessions = await API.getSessions(classId);
             totalStats.totalSessions += sessions.length;
 
@@ -2439,7 +1709,6 @@ async function renderCMAttendanceStats(cmId, cmClasses) {
                 totalRecords: 0
             };
 
-            // Get attendance for each session
             for (const session of sessions) {
                 if (session.status === 'completed') {
                     totalStats.completedSessions++;
@@ -2476,19 +1745,12 @@ async function renderCMAttendanceStats(cmId, cmClasses) {
             classStats.push(classAttendanceStats);
         }
 
-        // Calculate rates
         const totalPresent = totalStats.onTime + totalStats.late;
         const attendanceRate = totalStats.attendanceRecords > 0
             ? ((totalPresent / totalStats.attendanceRecords) * 100).toFixed(1)
             : 0;
 
-        const sessionCompletionRate = totalStats.totalSessions > 0
-            ? ((totalStats.completedSessions / totalStats.totalSessions) * 100).toFixed(1)
-            : 0;
-
-        // Render statistics
         container.innerHTML = `
-            <!-- Overall Stats -->
             <div class="stats-grid" style="margin-bottom: 32px;">
                 <div class="stat-card">
                     <div class="stat-icon green">
@@ -2528,7 +1790,6 @@ async function renderCMAttendanceStats(cmId, cmClasses) {
                 </div>
             </div>
 
-            <!-- Attendance Breakdown -->
             <div class="alert alert-info" style="margin-bottom: 24px;">
                 <i class="fas fa-chart-pie"></i>
                 <div>
@@ -2554,7 +1815,6 @@ async function renderCMAttendanceStats(cmId, cmClasses) {
                 </div>
             </div>
 
-            <!-- Per-Class Stats Table -->
             <h3 style="margin-bottom: 16px;">Chi tiết từng lớp</h3>
             <div class="table-container">
                 <table>
@@ -2619,23 +1879,149 @@ async function renderCMAttendanceStats(cmId, cmClasses) {
     }
 }
 
-// Tab switching for CM Detail Modal
+// ===== UTILITIES =====
+function openModal(modalId) {
+    const m = document.getElementById(modalId);
+    if (!m) return;
+    m.classList.add('active');
+    document.body.style.overflow = 'hidden';
+}
+
+function closeModal(modalId) {
+    const m = document.getElementById(modalId);
+    if (!m) return;
+    m.classList.remove('active');
+    document.body.style.overflow = 'auto';
+}
+
 function switchTab(event, tabId) {
     const tabs = event.target.closest('.tabs');
     if (!tabs) return;
-
     tabs.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     event.target.classList.add('active');
-
     const modalBody = event.target.closest('.modal-body');
     modalBody.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-
-    const targetTab = document.getElementById(tabId);
-    if (targetTab) targetTab.classList.add('active');
+    document.getElementById(tabId).classList.add('active');
 }
 
+window.onclick = function (event) {
+    if (event.target.classList && event.target.classList.contains('modal')) {
+        event.target.classList.remove('active');
+        document.body.style.overflow = 'auto';
+    }
+}
 
-// ✅ CHỈ GIỮ LẠI PHẦN EXPOSE TO WINDOW
+function showAlert(type, message) {
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert alert-${type}`;
+    alertDiv.innerHTML = `<i class="fas fa-${type === 'success' ? 'check-circle' : type === 'info' ? 'info-circle' : 'exclamation-circle'}"></i> <span>${message}</span>`;
+
+    const container = document.querySelector('.main-content') || document.body;
+    container.insertBefore(alertDiv, container.firstChild);
+
+    setTimeout(() => alertDiv.remove(), 5000);
+}
+
+function showLoading() {
+    const l = document.getElementById('loadingOverlay');
+    if (l) l.classList.add('active');
+}
+
+function hideLoading() {
+    const l = document.getElementById('loadingOverlay');
+    if (l) l.classList.remove('active');
+}
+
+function formatDate(dateStr) {
+    if (!dateStr) return '';
+    try {
+        const d = new Date(dateStr);
+        return d.toLocaleDateString('vi-VN');
+    } catch (e) {
+        return dateStr;
+    }
+}
+
+function getInitials(name) {
+    if (!name) return '';
+    return name.split(' ').slice(-2).map(n => n[0]).join('').toUpperCase();
+}
+
+function getWeekdayName(day) {
+    const days = ['Chủ nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
+    return typeof day === 'number' ? days[day] : (days[parseInt(day)] || '');
+}
+
+function generateDefaultSessions(startDate, weekDay, total = 15) {
+    const sessions = [];
+    if (!startDate) {
+        let base = new Date();
+        for (let i = 0; i < total; i++) {
+            const d = new Date(base);
+            d.setDate(base.getDate() + i * 7);
+            sessions.push({ number: i + 1, date: d.toISOString().slice(0, 10) });
+        }
+        return sessions;
+    }
+    const start = new Date(startDate);
+    const target = parseInt(weekDay);
+    let first = new Date(start);
+    if (!isNaN(target) && target >= 0 && target <= 6) {
+        while (first.getDay() !== target) first.setDate(first.getDate() + 1);
+    }
+    for (let i = 0; i < total; i++) {
+        const d = new Date(first);
+        d.setDate(first.getDate() + i * 7);
+        sessions.push({ number: i + 1, date: d.toISOString().slice(0, 10) });
+    }
+    return sessions;
+}
+
+function previewSessions() {
+    const startDate = document.getElementById('classStartDate').value;
+    const weekDay = document.getElementById('classWeekDay').value;
+    const total = 15;
+    const preview = document.getElementById('sessionsPreview');
+    if (!preview) return;
+    if (!startDate || weekDay === '') {
+        preview.style.display = 'none';
+        return;
+    }
+    const sessions = generateDefaultSessions(startDate, parseInt(weekDay), total);
+    preview.style.display = 'block';
+    preview.innerHTML = `<strong>15 buổi (ví dụ) — Bắt đầu: ${formatDate(startDate)} — Buổi 1: ${formatDate(sessions[0].date)}</strong>`;
+}
+
+async function exportCMs() {
+    try {
+        showLoading();
+        const wb = XLSX.utils.book_new();
+        const data = cms.map(cm => ({
+            'Mã CM': cm.code, 'Họ & tên': cm.name, 'Email': cm.email, 'SĐT': cm.phone,
+            'Số lớp': classes.filter(c => c.cmId === cm.id).length, 'Trạng thái': cm.active ? 'Hoạt động' : 'Tạm dừng'
+        }));
+        const ws = XLSX.utils.json_to_sheet(data);
+        XLSX.utils.book_append_sheet(wb, ws, 'CMs');
+        const ts = new Date().toISOString().slice(0, 10);
+        XLSX.writeFile(wb, `Danh_sach_CM_${ts}.xlsx`);
+        hideLoading();
+        showAlert('success', 'Export thành công');
+    } catch (err) {
+        hideLoading();
+        console.error('exportCMs error', err);
+        showAlert('error', 'Không thể export');
+    }
+}
+
+function quickLogin(role) {
+    const user = CONFIG.DEMO_USERS[role];
+    if (!user) return;
+    document.getElementById('loginEmail').value = user.email;
+    document.getElementById('loginPassword').value = user.password;
+    login();
+}
+
+// ===== EXPOSE ALL FUNCTIONS TO WINDOW =====
 window.viewClassDetail = viewClassDetail;
 window.editClass = editClass;
 window.deleteClass = deleteClass;
@@ -2645,6 +2031,7 @@ window.editTeacher = editTeacher;
 window.deleteTeacher = deleteTeacher;
 window.editCM = editCM;
 window.deleteCM = deleteCM;
+window.viewCMDetail = viewCMDetail;
 window.openAddClassModal = openAddClassModal;
 window.openAddStudentModal = openAddStudentModal;
 window.openAddTeacherModal = openAddTeacherModal;
@@ -2667,11 +2054,7 @@ window.selectSession = selectSession;
 window.switchTab = switchTab;
 window.previewSessions = previewSessions;
 window.exportCMs = exportCMs;
-window.showRegisterForm = showRegisterForm;
-window.showLoginForm = showLoginForm;
-window.register = register;
-window.loadTeacherCMOptions = loadTeacherCMOptions;
 
-console.log('✅ App.js loaded successfully');
+console.log('✅ App.js refactored - loaded successfully');
 console.log('✅ All CRUD functions exposed to window');
-window.viewCMDetail = viewCMDetail;
+console.log('✅ Role system: 0=Admin, 1=Teacher, 2=CM');
